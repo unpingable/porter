@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "porter"
+version = "0.0.1"
+description = "A neutral courier for ephemeral substrates — runs a declared command and keeps honest receipts."
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "James Beck" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+porter = "porterlib.cli:main"
+
+[tool.setuptools]
+packages = ["porterlib"]
+py-modules = ["porter"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+timeout = 60
