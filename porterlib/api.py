@@ -55,6 +55,8 @@ def run(
     runs_dir: Pathish = "runs",
     remote_root: str | None = None,
     preserve: bool = False,
+    env: dict[str, str] | None = None,
+    worktree: bool = False,
 ) -> dict[str, Any]:
     """Run a declared command and return the final Porter record."""
     argv = _command_argv(command)
@@ -64,11 +66,11 @@ def run(
         return _finish(run_id, run_root, preserve=preserve)
 
     for src in _push_paths(push):
-        record = runner.push(run_id, run_root, src)
+        record = runner.push(run_id, run_root, src, worktree=worktree)
         if _is_terminal(record):
             return _finish(run_id, run_root, preserve=preserve)
 
-    record = runner.exec_command(run_id, run_root, argv)
+    record = runner.exec_command(run_id, run_root, argv, env)
     if _is_terminal(record):
         return _finish(run_id, run_root, preserve=preserve)
 

@@ -105,6 +105,21 @@ def git_archive_or_tar(src: Path) -> tuple[bytes, str]:
     return make_tar_bytes(src), "tar"
 
 
+def is_dirty_worktree(src: Path) -> bool:
+    """Return True if src is a git repo with uncommitted changes in the working tree."""
+    if not src.is_dir():
+        return False
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(src.resolve()), "status", "--porcelain"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        return proc.returncode == 0 and bool(proc.stdout.strip())
+    except OSError:
+        return False
+
+
 def safe_extract_tar_bytes(tar_bytes: bytes, dst: Path) -> list[Path]:
     dst = dst.resolve()
     extracted: list[Path] = []

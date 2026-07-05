@@ -20,6 +20,21 @@ def add_runs_dir(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--runs-dir", default="runs", help="directory for Porter run records")
 
 
+def parse_env(env_list: list[str] | None) -> dict[str, str]:
+    """Parse ['KEY=VAL', ...] into {'KEY': 'VAL', ...}; empty list → empty dict."""
+    if not env_list:
+        return {}
+    result: dict[str, str] = {}
+    for item in env_list:
+        if "=" not in item:
+            raise ValueError(f"--env requires KEY=VAL format, got: {item!r}")
+        key, _, value = item.partition("=")
+        if not key:
+            raise ValueError(f"--env requires a non-empty key, got: {item!r}")
+        result[key] = value
+    return result
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="porter")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -30,6 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--remote-root", help="remote custody root; defaults to /tmp/porter-<run_id>")
     run_p.add_argument("--push", action="append", default=[], help="local file/tree to push")
     run_p.add_argument("--pull", action="append", default=[], help="remote path/glob to pull from workdir")
+    run_p.add_argument("--env", action="append", default=[], metavar="KEY=VAL", help="set env var before command (repeatable); keys recorded, values never stored")
+    run_p.add_argument("--worktree", action="store_true", help="push the dirty working tree instead of git archive HEAD")
     run_p.add_argument("--propagate-exit", action="store_true", help="return payload exit for run_failed")
     run_p.add_argument("--preserve", action="store_true", help="preserve recipe-created substrate instead of invoking teardown")
     run_p.add_argument("cmd", nargs=argparse.REMAINDER)
@@ -41,12 +58,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     push_p = sub.add_parser("push", help="push a local file/tree to the substrate")
     add_runs_dir(push_p)
+    push_p.add_argument("--worktree", action="store_true", help="push the dirty working tree instead of git archive HEAD")
     push_p.add_argument("run")
     push_p.add_argument("src")
     push_p.add_argument("dst", nargs="?")
 
     exec_p = sub.add_parser("exec", help="run declared command and capture transcript")
     add_runs_dir(exec_p)
+    exec_p.add_argument("--env", action="append", default=[], metavar="KEY=VAL", help="set env var before command (repeatable); keys recorded, values never stored")
     exec_p.add_argument("--propagate-exit", action="store_true", help="return payload exit for run_failed")
     exec_p.add_argument("run")
     exec_p.add_argument("cmd", nargs=argparse.REMAINDER)
@@ -87,6 +106,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         runs_dir=Path(args.runs_dir),
         remote_root=args.remote_root,
         preserve=args.preserve,
+        env=parse_env(args.env) or None,
+        worktree=args.worktree,
     )
     print(record["run_id"])
     return runner.process_exit_for(record, args.propagate_exit)
@@ -99,13 +120,13 @@ def cmd_up(args: argparse.Namespace) -> int:
 
 
 def cmd_push(args: argparse.Namespace) -> int:
-    record = runner.push(args.run, Path(args.runs_dir), Path(args.src), args.dst)
+    record = runner.push(args.run, Path(args.runs_dir), Path(args.src), args.dst, worktree=args.worktree)
     return 0 if record.get("outcome") not in {records.OUTCOME_REFUSED, records.OUTCOME_PORTER_FAILED} else 1
 
 
 def cmd_exec(args: argparse.Namespace) -> int:
     cmd = strip_double_dash(args.cmd)
-    record = runner.exec_command(args.run, Path(args.runs_dir), cmd)
+    record = runner.exec_command(args.run, Path(args.runs_dir), cmd, parse_env(args.env) or None)
     if record.get("outcome") == records.OUTCOME_REFUSED:
         return 1
     records.decide_outcome(record)

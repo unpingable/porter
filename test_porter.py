@@ -673,6 +673,175 @@ class PorterCliTests(unittest.TestCase):
         self.assertTrue((run_base / "export" / "aggregate.json").exists())
         self.assertTrue((run_base / "SHA256SUMS").exists())
 
+    # ── Task A: env injection ──────────────────────────────────────────────
+
+    def _init_git_repo(self, src: Path, filename: str, content: str) -> None:
+        """Create a minimal git repo at src with one committed file."""
+        src.mkdir(parents=True, exist_ok=True)
+        (src / filename).write_text(content, encoding="utf-8")
+        for cmd in [
+            ["git", "init", str(src)],
+            ["git", "-C", str(src), "config", "user.email", "porter-test@test.local"],
+            ["git", "-C", str(src), "config", "user.name", "Porter Test"],
+            ["git", "-C", str(src), "config", "commit.gpgsign", "false"],
+            ["git", "-C", str(src), "add", filename],
+            ["git", "-C", str(src), "commit", "-m", "initial commit"],
+        ]:
+            subprocess.run(cmd, check=True, capture_output=True)
+
+    def test_env_reaches_remote_command(self) -> None:
+        """env var set via --env reaches the remote command and appears in transcript."""
+        runs_dir = self.tmp_path / "env-runs"
+        remote_root = self.tmp_path / "env-remote"
+
+        result = self.run_porter(
+            "run",
+            "--runs-dir", str(runs_dir),
+            "--target", "ssh:fake",
+            "--remote-root", str(remote_root),
+            "--env", "PORTER_TEST_GREETING=hello-from-env",
+            "--",
+            "sh", "-c", "echo $PORTER_TEST_GREETING",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run_id = result.stdout.strip()
+        record = self.load_record(runs_dir, run_id)
+        exec_step = next(step for step in record["steps"] if step["kind"] == "exec")
+        transcript = (runs_dir / run_id / exec_step["transcript"]).read_text(encoding="utf-8")
+
+        self.assertEqual(record["outcome"], records.OUTCOME_COMPLETED)
+        self.assertIn("hello-from-env", transcript)
+        self.assertEqual(exec_step.get("env_keys"), ["PORTER_TEST_GREETING"])
+
+    def test_env_key_recorded_value_never_in_record_or_transcript(self) -> None:
+        """env keys appear in step metadata; raw values appear nowhere in record or transcripts."""
+        runs_dir = self.tmp_path / "env-custody-runs"
+        remote_root = self.tmp_path / "env-custody-remote"
+        # Unique sentinel that must not leak into any porter-written file.
+        secret = "xportersecret-custody-z"
+
+        result = self.run_porter(
+            "run",
+            "--runs-dir", str(runs_dir),
+            "--target", "ssh:fake",
+            "--remote-root", str(remote_root),
+            "--env", f"PORTER_CUSTODY_KEY={secret}",
+            "--",
+            "sh", "-c", '[ -n "$PORTER_CUSTODY_KEY" ] && echo env-present || echo env-absent',
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run_id = result.stdout.strip()
+        run_base = runs_dir / run_id
+        record = self.load_record(runs_dir, run_id)
+        exec_step = next(step for step in record["steps"] if step["kind"] == "exec")
+
+        # Step records the key, not the value.
+        self.assertEqual(exec_step.get("env_keys"), ["PORTER_CUSTODY_KEY"])
+
+        # Value must not appear in record.json.
+        record_text = (run_base / "record.json").read_text(encoding="utf-8")
+        self.assertNotIn(secret, record_text, "env value leaked into record.json")
+
+        # Value must not appear in any transcript file.
+        for transcript_path in sorted((run_base / "transcripts").iterdir()):
+            text = transcript_path.read_text(encoding="utf-8", errors="replace")
+            self.assertNotIn(secret, text, f"env value leaked into {transcript_path.name}")
+
+        # Command confirmed env var was accessible (without echoing the value).
+        exec_transcript = (run_base / exec_step["transcript"]).read_text(encoding="utf-8")
+        self.assertIn("env-present", exec_transcript)
+
+    # ── Task B: dirty-worktree honesty at push ─────────────────────────────
+
+    def test_dirty_worktree_push_records_annotation(self) -> None:
+        """Push of a dirty git worktree → push step carries dirty_worktree: True."""
+        src = self.tmp_path / "dirty-src"
+        self._init_git_repo(src, "tracked.txt", "committed\n")
+        # Make worktree dirty by adding an untracked file.
+        (src / "untracked.txt").write_text("new and untracked\n", encoding="utf-8")
+
+        runs_dir = self.tmp_path / "dirty-runs"
+        remote_root = self.tmp_path / "dirty-remote"
+        result = self.run_porter(
+            "run",
+            "--runs-dir", str(runs_dir),
+            "--target", "ssh:fake",
+            "--remote-root", str(remote_root),
+            "--push", str(src),
+            "--",
+            "sh", "-c", "echo ok",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run_id = result.stdout.strip()
+        record = self.load_record(runs_dir, run_id)
+        push_step = next(step for step in record["steps"] if step["kind"] == "push")
+        self.assertTrue(
+            push_step.get("dirty_worktree"),
+            f"expected dirty_worktree annotation in push step; got: {push_step}",
+        )
+
+    def test_clean_worktree_push_no_dirty_annotation(self) -> None:
+        """Push of a clean git worktree → dirty_worktree annotation absent from push step."""
+        src = self.tmp_path / "clean-src"
+        self._init_git_repo(src, "tracked.txt", "committed\n")
+        # No modifications — worktree is clean.
+
+        runs_dir = self.tmp_path / "clean-runs"
+        remote_root = self.tmp_path / "clean-remote"
+        result = self.run_porter(
+            "run",
+            "--runs-dir", str(runs_dir),
+            "--target", "ssh:fake",
+            "--remote-root", str(remote_root),
+            "--push", str(src),
+            "--",
+            "sh", "-c", "echo ok",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run_id = result.stdout.strip()
+        record = self.load_record(runs_dir, run_id)
+        push_step = next(step for step in record["steps"] if step["kind"] == "push")
+        self.assertFalse(
+            push_step.get("dirty_worktree"),
+            f"expected no dirty_worktree annotation on clean push; got: {push_step}",
+        )
+
+    def test_worktree_flag_delivers_dirty_bytes(self) -> None:
+        """--worktree pushes the working tree (including uncommitted edits), not git archive HEAD."""
+        src = self.tmp_path / "worktree-src"
+        self._init_git_repo(src, "hello.txt", "committed-content\n")
+        # Modify hello.txt without committing — git archive HEAD would give the old content.
+        (src / "hello.txt").write_text("dirty-content\n", encoding="utf-8")
+
+        runs_dir = self.tmp_path / "worktree-runs"
+        remote_root = self.tmp_path / "worktree-remote"
+        result = self.run_porter(
+            "run",
+            "--runs-dir", str(runs_dir),
+            "--target", "ssh:fake",
+            "--remote-root", str(remote_root),
+            "--push", str(src),
+            "--pull", "hello.txt",
+            "--worktree",
+            "--",
+            "sh", "-c", "echo ok",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run_id = result.stdout.strip()
+        run_base = runs_dir / run_id
+        record = self.load_record(runs_dir, run_id)
+        artifact = record["artifacts"][0]
+        content = (run_base / artifact["local_path"]).read_text(encoding="utf-8")
+        self.assertEqual(
+            content, "dirty-content\n",
+            "expected dirty working-tree bytes to be delivered, not git archive HEAD",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
