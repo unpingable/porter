@@ -4,6 +4,24 @@ A neutral courier for ephemeral substrates: it runs a declared command on a decl
 temporary substrate (VM, container, or reachable host) and brings back honest receipts —
 transcript, true exit code, produced artifacts, and their hashes. A mule with receipts.
 
+## 30-second specimen
+
+```bash
+sh demo/refused-exit.sh
+```
+
+Simulates a dropped SSH connection so the exit code is never observed. Expected output
+(no VM, no live host, no real network needed):
+
+```
+outcome: "refused"
+refusal_reason: "command exit code was not observed; ssh exited 255"
+exit_code_observed: false
+```
+
+Porter exits nonzero. A refusal must never look like process-success, even when the
+courier machinery itself ran cleanly.
+
 ## What it does
 
 - Runs a declared command on a declared substrate and captures its **true** exit code.
@@ -40,6 +58,18 @@ transcript, true exit code, produced artifacts, and their hashes. A mule with re
 ./porter show <run_id>
 python3 -m pytest        # tests
 ```
+
+**`--env KEY=VAL`** (repeatable) — injects an environment variable before the command on
+the substrate. Keys are recorded in the run record; values are never stored in the record
+or transcript (the most likely secret carrier).
+
+**`--worktree`** — pushes the dirty working tree instead of `git archive HEAD`. If the
+working tree has uncommitted edits and `--worktree` is not set, the push step records that
+fact so the receipt cannot silently imply the dirty edits were tested.
+
+**SSH path caveat** — the quickstart `ssh:<host>` form has been exercised via the fake-ssh
+test shim (`demo/refused-exit.sh`) but not yet against a real SSH host. Real-host run
+pending; treat that path as tested-in-lab, not stranger-run-verified.
 
 ## Python API
 
