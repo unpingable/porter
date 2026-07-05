@@ -72,6 +72,7 @@ class RecordContractTests(unittest.TestCase):
         step["transcript_sha256"] = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
         record["artifacts"].append(
             {
+                "class": records.CUSTODY_BLOB,
                 "remote_path": "out.txt",
                 "local_path": "artifacts/out.txt",
                 "sha256": "3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7",
@@ -89,13 +90,61 @@ class RecordContractTests(unittest.TestCase):
         self.assertEqual(record["schema"], records.RECORD_SCHEMA)
         self.assertEqual(set(record), records.REQUIRED_RECORD_V0_FIELDS)
 
+        # Pin: every step carries class="receipt"; every artifact carries class="blob".
+        for step in record["steps"]:
+            self.assertEqual(step["class"], records.CUSTODY_RECEIPT, f"step {step.get('seq')} class wrong")
+        for artifact in record["artifacts"]:
+            self.assertEqual(artifact["class"], records.CUSTODY_BLOB, f"artifact {artifact.get('local_path')} class wrong")
+
     def test_generated_record_preserves_golden_v0_shape(self) -> None:
         golden = self.load_golden()
         record = self.fixture_shaped_record()
 
         records.validate_record_contract(record)
 
+        # The golden is a full-shape pin including class fields; assert_json_subset
+        # verifies the generated record contains every key/value the golden declares.
         self.assert_json_subset(golden, record)
+
+        # Explicit class-field assertions so the intent is stated at read time.
+        for step in record["steps"]:
+            self.assertEqual(step["class"], records.CUSTODY_RECEIPT)
+        for artifact in record["artifacts"]:
+            self.assertEqual(artifact["class"], records.CUSTODY_BLOB)
+
+    def test_no_ag_vocabulary_in_porter_tree(self) -> None:
+        """Porter must not carry AG-internal vocabulary in code or data files.
+
+        AG-specific field names (cage + attestation, not_live + testimony) belong
+        to agent_gov, not porter.  If they appear in .py/.sh/.json files in this
+        tree it means AG-specific records were committed here — a domain-separation
+        violation (porter charter §1 / DESIGN.md F6).
+
+        Terms are assembled from parts so this file does not self-trigger.
+        """
+        # Split so this file does not match its own scan.
+        ag_terms = [
+            "cage_" + "attestation",
+            "not_live_" + "testimony",
+        ]
+        scan_suffixes = {".py", ".sh", ".json"}
+        violations: list[str] = []
+
+        for path in sorted(ROOT.rglob("*")):
+            if ".git" in path.parts or "__pycache__" in path.parts:
+                continue
+            if path.suffix not in scan_suffixes or not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for term in ag_terms:
+                if term in text:
+                    violations.append(f"{path.relative_to(ROOT)}: contains {term!r}")
+
+        if violations:
+            self.fail("AG vocabulary in porter tree (domain-separation violation):\n" + "\n".join(violations))
 
     def test_domain_verdict_fields_are_rejected_at_any_depth(self) -> None:
         for field in records.DOMAIN_VERDICT_FIELDS:

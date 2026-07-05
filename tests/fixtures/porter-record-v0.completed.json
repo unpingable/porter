@@ -1,6 +1,7 @@
 {
   "artifacts": [
     {
+      "class": "blob",
       "local_path": "artifacts/out.txt",
       "remote_path": "out.txt",
       "sha256": "3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7",
@@ -21,6 +22,7 @@
   "schema": "porter.record.v0",
   "steps": [
     {
+      "class": "receipt",
       "declared": "sh -c 'printf data > out.txt'",
       "ended_at": "2026-06-30T18:22:06Z",
       "exit_code": 0,
