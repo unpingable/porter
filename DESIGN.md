@@ -513,14 +513,15 @@ rewritten — only annotated.
   annotated (`dirty_worktree`) so the receipt cannot imply the uncommitted edits were tested.
 - **F6 — CLOSED** (`e64b3f6`). The topology-leaking AG specimen was removed from `outputs/`;
   golden-fixture custody classes pinned.
-- **F7 — live-transport evidence landed; foreign-host gap remains.** Fake-SSH/fake-serial shims
-  drive the transports in CI (28 tests). Beyond the shim, the ssh path now has a **live** specimen
-  against a real `sshd` (`docs/specimens/ssh-localhost.md`): `completed` + `run_failed` with true
-  exit codes (0 / 7), artifact hash matching `sha256sum -c`, v0-valid record, scrubbed
-  blob-excluding aggregate, and F1's `--expect` matched against live-observed facts. That demotes
-  the shim to lab-only. It is **localhost** — real transport, local host — so full F7 closure
-  still wants a *disposable, genuinely remote* host (§10.3 item 2) and a **live refusal** capture
-  (the sentinel-never-returns path is still shim-only).
+- **F7 — CLOSED.** The ssh path now has live testimony against **foreign substrates**, not just
+  the shim: two disposable containers (Alpine 3.23, Debian 12) running real `sshd`, reached over
+  real `ssh` + TCP (`docs/specimens/ssh-docker.md`). All three reachable outcomes captured live —
+  `completed` (foreign hostname, artifact hash == `sha256sum -c`, v0-valid record, scrubbed
+  blob-excluding aggregate), `run_failed` (true exit `7`, Porter exit `0`), and **`refused`**
+  (container killed mid-exec → `exit_code_observed: false`, no `exit_code`, Porter exit `1`) —
+  plus a live F1 mismatch (declared `arch=riscv64` → Porter-computed against observed `x86_64`).
+  A localhost specimen (`docs/specimens/ssh-localhost.md`) also exists. The fake-ssh/fake-serial
+  shims remain fast no-substrate CI coverage (28 tests); they are no longer the *only* evidence.
 - **F1 — CLOSED** (working tree, uncommitted). Porter now computes `fact_mismatches` itself:
   `record.compute_fact_mismatches` / `refresh_fact_mismatches` is the *sole writer*, comparing a
   new caller-declared `substrate.declared_facts` against probed `observed` only for facts present

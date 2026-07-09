@@ -1,0 +1,134 @@
+{
+  "artifact_receipts": [
+    {
+      "class": "receipt",
+      "custody_class": "blob",
+      "local_path": "artifacts/out.txt",
+      "remote_path": "out.txt",
+      "sha256": "48cd07cdf6f6e2a99965cbdd0a2e9fba1c651ebe115eae5af9dd98997aca39b9",
+      "size": 14
+    }
+  ],
+  "artifacts": [],
+  "declared_command": {
+    "argc": 3,
+    "argv_sha256": "fc6f44865f6b3a30a23b15232e7fbc122397e009ffdc3f0e21d985641b5b6b69",
+    "class": "receipt",
+    "scrubbed": true
+  },
+  "export_policy": {
+    "excluded_classes": [
+      "blob"
+    ],
+    "included_classes": [
+      "recipe",
+      "receipt"
+    ]
+  },
+  "notes": "ssh target was not provisioned by Porter",
+  "outcome": "completed",
+  "porter_version": "0.0.1",
+  "preserved": true,
+  "refusal_reason": null,
+  "replay": {
+    "checksums": "SHA256SUMS",
+    "class": "receipt",
+    "commands": [
+      {
+        "argv": [
+          "sha256sum",
+          "-c",
+          "SHA256SUMS"
+        ],
+        "cwd": "runs/2026-07-09T19-17-50Z-7fce99"
+      },
+      {
+        "argv": [
+          "./porter",
+          "show",
+          "2026-07-09T19-17-50Z-7fce99"
+        ],
+        "cwd": "."
+      }
+    ],
+    "local_custody": {
+      "artifacts": "artifacts/",
+      "transcripts": "transcripts/"
+    },
+    "record": "record.json"
+  },
+  "run_id": "2026-07-09T19-17-50Z-7fce99",
+  "schema": "porter.record.v0",
+  "steps": [
+    {
+      "class": "receipt",
+      "declared_length": 148,
+      "declared_scrubbed": true,
+      "declared_sha256": "b7a255a2f9b6f967134fb45ba76af37a2d558cebd281a13e23d6dfc5c6c02e55",
+      "ended_at": "2026-07-09T19:17:50Z",
+      "exit_code": 0,
+      "exit_code_observed": true,
+      "kind": "push",
+      "seq": 1,
+      "started_at": "2026-07-09T19:17:50Z",
+      "transcript": "transcripts/0001-push.log",
+      "transcript_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "class": "receipt",
+      "declared_length": 65,
+      "declared_scrubbed": true,
+      "declared_sha256": "07f300f9ce0f3d4e42612c22f85a0d7e7db51c6e1fad77ecaa4bc85bfa60cf31",
+      "ended_at": "2026-07-09T19:17:50Z",
+      "exit_code": 0,
+      "exit_code_observed": true,
+      "kind": "exec",
+      "seq": 2,
+      "started_at": "2026-07-09T19:17:50Z",
+      "transcript": "transcripts/0002-exec.log",
+      "transcript_sha256": "7a2451aaecd43bde2b4e461f8b23cf4fe4715671a980fdadc0014a84a2675aee"
+    },
+    {
+      "class": "receipt",
+      "declared_length": 12,
+      "declared_scrubbed": true,
+      "declared_sha256": "980877e1d68cc23c7a3df66b84da39d3733dd63c5dd5b10b7e66492eebf6a192",
+      "ended_at": "2026-07-09T19:17:50Z",
+      "exit_code": 0,
+      "exit_code_observed": true,
+      "kind": "pull",
+      "seq": 3,
+      "started_at": "2026-07-09T19:17:50Z",
+      "transcript": "transcripts/0003-pull.log",
+      "transcript_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "substrate": {
+    "class": "receipt",
+    "declared_fact_keys": [
+      "arch",
+      "os"
+    ],
+    "declared_keys": [
+      "host",
+      "remote_root",
+      "workdir"
+    ],
+    "ephemeral": false,
+    "fact_mismatch_count": 1,
+    "kind": "ssh",
+    "observed_keys": [
+      "arch",
+      "hostname",
+      "kernel",
+      "os"
+    ],
+    "scrubbed": true,
+    "transport": "ssh"
+  },
+  "target": {
+    "class": "receipt",
+    "scheme": "ssh",
+    "scrubbed": true
+  }
+}

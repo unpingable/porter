@@ -67,12 +67,13 @@ or transcript (the most likely secret carrier).
 working tree has uncommitted edits and `--worktree` is not set, the push step records that
 fact so the receipt cannot silently imply the dirty edits were tested.
 
-**SSH path caveat** — the `ssh:<host>` transport now has **live-transport** evidence against a
-real `sshd` (`completed` + `run_failed`, true exit codes, artifact hashes; see
-[`docs/specimens/ssh-localhost.md`](docs/specimens/ssh-localhost.md)), which demotes the
-fake-ssh test shim to lab-only coverage. That specimen is **localhost** — real transport, local
-host — so it is *not* foreign-substrate testimony: a disposable remote host, and a live refusal
-capture, are still wanted before calling the path stranger-run-verified.
+**SSH path** — verified live against real `sshd`, not just the fake-ssh test shim. Foreign-host
+testimony now exists across all three reachable outcomes — `completed`, `run_failed`, and a live
+`refused` (connection killed mid-exec) — against disposable Alpine + Debian containers over real
+`ssh` on TCP, plus a live F1 fact-mismatch (see
+[`docs/specimens/ssh-docker.md`](docs/specimens/ssh-docker.md); a localhost specimen is at
+[`docs/specimens/ssh-localhost.md`](docs/specimens/ssh-localhost.md)). The shim remains as fast,
+no-substrate CI coverage — no longer the only evidence the path works.
 
 ## Python API
 

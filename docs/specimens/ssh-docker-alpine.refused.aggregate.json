@@ -1,0 +1,93 @@
+{
+  "artifact_receipts": [],
+  "artifacts": [],
+  "declared_command": {
+    "argc": 3,
+    "argv_sha256": "984be80e4fd023895bf07138046d19350b178c7156731310d2efa79a1b60187a",
+    "class": "receipt",
+    "scrubbed": true
+  },
+  "export_policy": {
+    "excluded_classes": [
+      "blob"
+    ],
+    "included_classes": [
+      "recipe",
+      "receipt"
+    ]
+  },
+  "notes": "ssh target was not provisioned by Porter",
+  "outcome": "refused",
+  "porter_version": "0.0.1",
+  "preserved": true,
+  "refusal_reason": "command exit code was not observed; ssh exited 255",
+  "replay": {
+    "checksums": "SHA256SUMS",
+    "class": "receipt",
+    "commands": [
+      {
+        "argv": [
+          "sha256sum",
+          "-c",
+          "SHA256SUMS"
+        ],
+        "cwd": "runs/2026-07-09T19-18-06Z-09ab76"
+      },
+      {
+        "argv": [
+          "./porter",
+          "show",
+          "2026-07-09T19-18-06Z-09ab76"
+        ],
+        "cwd": "."
+      }
+    ],
+    "local_custody": {
+      "artifacts": "artifacts/",
+      "transcripts": "transcripts/"
+    },
+    "record": "record.json"
+  },
+  "run_id": "2026-07-09T19-18-06Z-09ab76",
+  "schema": "porter.record.v0",
+  "steps": [
+    {
+      "class": "receipt",
+      "declared_length": 64,
+      "declared_scrubbed": true,
+      "declared_sha256": "4f0f7e8fbf410277ad02f5bd611b698efeac8cc78c2b7d02a3fac20208c23ec0",
+      "ended_at": "2026-07-09T19:18:10Z",
+      "exit_code_observed": false,
+      "kind": "exec",
+      "seq": 1,
+      "started_at": "2026-07-09T19:18:06Z",
+      "transcript": "transcripts/0001-exec.log",
+      "transcript_sha256": "f6713026e36eeee7e5c19fed51dfc6d2fab60477d07ebeb7ab0cae82296cf0dd"
+    }
+  ],
+  "substrate": {
+    "class": "receipt",
+    "declared_fact_keys": [],
+    "declared_keys": [
+      "host",
+      "remote_root",
+      "workdir"
+    ],
+    "ephemeral": false,
+    "fact_mismatch_count": 0,
+    "kind": "ssh",
+    "observed_keys": [
+      "arch",
+      "hostname",
+      "kernel",
+      "os"
+    ],
+    "scrubbed": true,
+    "transport": "ssh"
+  },
+  "target": {
+    "class": "receipt",
+    "scheme": "ssh",
+    "scrubbed": true
+  }
+}
