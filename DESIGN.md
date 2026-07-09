@@ -498,3 +498,154 @@ sentinel-parse and refusal paths that matter most.
 needle — F2 closes the design's own worked example, and F1 is the difference between a computed
 honesty note and a field that only pretends to check. F3 is a small refusal-honesty patch worth
 folding in with F2. F4–F7 are recognized and fenced, not deferred into "never."
+
+### Status update (2026-07-09)
+
+The findings above are the prosecutor record as first written; this block layers what Codex
+has since closed (basis named, per the repo's "claim names its basis" rule). Findings are not
+rewritten — only annotated.
+
+- **F2 — CLOSED** (`6f8441a`). `--env KEY=VAL` on `run`/`exec`; `build_exec_script(..., env=)`;
+  keys recorded, values never stored (asserted by test). The charter's worked example is served.
+- **F3 — CLOSED** (`6f8441a`). `is_dirty_worktree` + `push --worktree`; a dirty tree is
+  annotated (`dirty_worktree`) so the receipt cannot imply the uncommitted edits were tested.
+- **F6 — CLOSED** (`e64b3f6`). The topology-leaking AG specimen was removed from `outputs/`;
+  golden-fixture custody classes pinned.
+- **F7 — partially closed.** Fake-SSH and fake-serial shims now drive the transports in CI
+  (19 tests, up from 13). The remaining gap is *live authority*: the real `ssh:<host>` path is
+  still only exercised through the shim — carried forward as §10.3 build-order item 2
+  (real-host specimen), the honest close.
+- **F1 — CLOSED** (working tree, uncommitted). Porter now computes `fact_mismatches` itself:
+  `record.compute_fact_mismatches` / `refresh_fact_mismatches` is the *sole writer*, comparing a
+  new caller-declared `substrate.declared_facts` against probed `observed` only for facts present
+  in both — a note, never a gate (outcome is unaffected). Callers declare via `--expect KEY=VAL`
+  (ssh/serial) or recipe `declared_facts`; `recipe.py` now *strips* the caller's self-declared
+  `fact_mismatches` as untrusted. Aggregate `fact_mismatch_count` is derived from the computed
+  list. Tests: `test_fact_mismatches_{match_yields_zero,mismatch_is_emitted,only_compares_observed_facts}`,
+  `test_recipe_cannot_force_empty_fact_mismatches`,
+  `test_recipe_predeclared_mismatches_do_not_control_result`, `test_expect_flag_computes_ssh_fact_mismatch`
+  (25 passed). No schema-breaking rename — `declared_facts` is additive to `porter.record.v0`.
+- **F4, F5 — OPEN, fenced.** In-memory transcript (F4) and run-state locking (F5) stand as
+  written; F4 folds into the §10 adapter/transport work.
+
+## 10. Substrate-adapter direction (recorded 2026-07-09)
+
+Operator-directed direction, recorded per *name early, ratify lazily*. **This section is a
+handle for review, not authorization to build.** Nothing here lands without a forcing case and
+testable acceptance; every schema-touching item is **additive** to `porter.record.v0` and needs
+deliberate ratification before it ships. Exactly one thing here is recorded as **binding
+doctrine** rather than candidate — §10.1, the boundary that keeps the rest from metastasizing.
+
+### 10.1 Boundary doctrine — mechanics yes, kingdom no  [binding]
+
+Transport is never purely semantic: somebody must actually create the sandbox, bind the mounts,
+clamp the network, inject env/secrets, collect logs/artifacts, kill the payload when it gets
+clever, and prove teardown happened. **That is legitimate Porter work.** The bright line:
+
+> Porter may implement the boundary mechanics needed to preserve courier semantics across a
+> substrate. Porter must not schedule, place, reconcile, admit, verify, or judge work.
+
+Operating rule when a backend leaks semantics:
+
+```
+Use existing substrate when it preserves the contract.
+Wrap substrate when it leaks semantics.
+Emulate only the minimum needed to preserve custody.
+Never build a general platform when a typed adapter suffices.
+```
+
+Backend adapters, not a kingdom. The test:
+
+> If Porter starts deciding *what should run*, it is wrong.
+> If Porter decides *how to preserve the admitted run's constraints on this backend*, it is
+> doing its job.
+
+The layering Porter sits in — it owns translation fidelity, not fleet destiny:
+
+```
+AG:      may this run exist?
+Maude:   how is this run supervised?
+Porter:  can this run be carried into backend X without semantic damage?
+Backend: actually run the thing.
+```
+
+The failure mode, refused by name — the moment Porter grows node state it is over:
+
+```
+Docker adapter → lifecycle tracking → workers → placement → leases →
+health checks → reconciliation → congratulations, you have built haunted Kubernetes.
+```
+
+This does **not** repeal §1 / §8's "not a provisioning framework." A typed adapter that binds a
+mount or clamps a network for *one* backend is boundary mechanics; a scheduler that places work
+across many is the framework §1 forbids. House-style gloss:
+
+> Porter carries the box. It does not decide whether the box should exist, whether the contents
+> are good, or whether the warehouse needs a religion.
+
+### 10.2 Candidate surfaces (named, non-binding)
+
+Named early because retrofit cost rises once backends multiply — these are exactly the
+APIs / schemas / wire formats to record *before* they spread, not build now.
+
+- **C1 — Adapter seam.** Today `runner.py` branches on target prefix (`ssh:`/`serial:`/`recipe:`)
+  — fine at this size, ugly once Docker/Podman/Firecracker arrive. Candidate behavior-preserving
+  interface `SubstrateAdapter{ up, push, exec, pull, down, observe, capabilities }`, one module
+  per adapter under `porterlib/adapters/`. Acceptance: same CLI, same records, same golden
+  fixtures, no schema change *unless capability metadata is added deliberately*.
+- **C2 — Capability model.** Each adapter *declares* what it supports rather than implying it —
+  transport truth, not governance: `push / pull / exec / env / teardown / resource_limits /
+  network_policy / teardown_attestation`. Without it Porter eventually **lies by omission** (ssh
+  and serial can't limit CPU or shape network; Docker can). Additive metadata, not a verdict.
+- **C3 — Constraint carriage (schema-danger zone).** For constellation use Porter must *carry*
+  constraints (network deny/egress; cpu/mem/wall-time/disk; ro/rw filesystem), never *decide*
+  them. The receipt records four typed facts and nothing implying safety:
+  `constraint_declared`, `constraint_applied`, `constraint_application_observed`,
+  `constraint_refusal_reason`. Declared / backend-support / observed-application-or-refusal —
+  never "this was safe." Unsupported constraint → refuse or record-unsupported clearly.
+- **C4 — Timeout / cancellation taxonomy.** Typed outcomes are missing: `setup_timeout`,
+  `exec_timeout`, `pull_timeout`, `down_timeout`, `operator_cancelled`, `transport_lost`.
+  Load-bearing rule, already aligned with the unobserved-exit invariant (§6): **a timeout with
+  unknown payload exit is `refused`, not `failed`.**
+- **C5 — Secret wall.** Extends the landed env key-only recording (F2). For container exec:
+  `--secret KEY=source`, key-names only, never echo values on the command line, file-or-env
+  injection per backend, a redaction token for transcripts, and a **hostile test** where the
+  payload tries to print the secret. Explicit doctrine, not vibes: if the payload prints a secret
+  Porter never held, Porter cannot scrub it — redaction requires Porter to hold the value or a
+  token. Name that limit; don't paper over it.
+- **C6 — Schema made boringly explicit.** The schema is the product; the CLI is just how the
+  mule currently walks. Owed: `docs/schema/porter.record.v0.md`; fixtures for `refused` /
+  `run_failed` / `porter_failed`; a schema changelog; a stated unknown-field compatibility rule
+  (allowed / rejected / namespaced).
+- **C7 — Export verifier.** A neutral integrity checker, not a pass/fail oracle:
+  `porter verify-record <run>` / `porter verify-export <aggregate.json>` — asserts hashes line
+  up, schema validates, referenced files present, and **no blob-class item leaked into the
+  export**. Not "passed"; custody integrity only.
+- **C8 — Caller integration seam.** A thin neutral `PorterRequest(target, command, pushes,
+  pulls, env_keys, constraints)` over the record-returning API — still returns a record, never a
+  boolean, never AG/Maude vocabulary. The domain-separation test is the immune system; keep it.
+
+### 10.3 Candidate build order (soft fences, forcing-case gated)
+
+Not a commitment — the order to *reach for* when a forcing case lands, each slice proving the
+contract before an abstraction is frozen:
+
+1. **Adapter seam, zero behavior change** — refactor prefix branching into `adapters/`; every
+   test green; no schema change.
+2. **Real-SSH specimen** — run the ssh path against a disposable real host (the ssh path is
+   still only exercised through the fake shim). Capture record + refusal + artifact-hash +
+   caveats under `docs/specimens/`. Closes the live-authority gap F7 left open. Do this
+   **before** widening the surface.
+3. **Docker via recipe specimen** — prove container semantics through the *recipe* transport
+   first (disposable container, mounted workdir, exec, pull, `down` destroys, `--preserve`
+   skips); record stays `porter.record.v0`. Recipe-first tells you what the contract needs
+   before code freezes a bad shape.
+4. **Constraint declaration skeleton** — the C3 fields behind the docker/recipe specimen;
+   unsupported → refuse-or-record-unsupported; no safety claim.
+5. **Native docker/podman adapter** — only after the recipe specimen proves the shape. Records
+   image digest + container id + observed teardown; applies-or-refuses resource/network
+   declarations; **no scheduling language.**
+
+Scope-control anchor, recorded verbatim: *Porter does not need a new project. It needs an
+adapter seam, capability/refusal vocabulary, real-host evidence, then a container specimen. The
+cursed k8s trap starts the moment it grows node state.*
