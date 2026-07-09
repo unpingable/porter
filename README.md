@@ -67,9 +67,12 @@ or transcript (the most likely secret carrier).
 working tree has uncommitted edits and `--worktree` is not set, the push step records that
 fact so the receipt cannot silently imply the dirty edits were tested.
 
-**SSH path caveat** — the quickstart `ssh:<host>` form has been exercised via the fake-ssh
-test shim (`demo/refused-exit.sh`) but not yet against a real SSH host. Real-host run
-pending; treat that path as tested-in-lab, not stranger-run-verified.
+**SSH path caveat** — the `ssh:<host>` transport now has **live-transport** evidence against a
+real `sshd` (`completed` + `run_failed`, true exit codes, artifact hashes; see
+[`docs/specimens/ssh-localhost.md`](docs/specimens/ssh-localhost.md)), which demotes the
+fake-ssh test shim to lab-only coverage. That specimen is **localhost** — real transport, local
+host — so it is *not* foreign-substrate testimony: a disposable remote host, and a live refusal
+capture, are still wanted before calling the path stranger-run-verified.
 
 ## Python API
 

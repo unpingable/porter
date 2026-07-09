@@ -513,10 +513,14 @@ rewritten — only annotated.
   annotated (`dirty_worktree`) so the receipt cannot imply the uncommitted edits were tested.
 - **F6 — CLOSED** (`e64b3f6`). The topology-leaking AG specimen was removed from `outputs/`;
   golden-fixture custody classes pinned.
-- **F7 — partially closed.** Fake-SSH and fake-serial shims now drive the transports in CI
-  (19 tests, up from 13). The remaining gap is *live authority*: the real `ssh:<host>` path is
-  still only exercised through the shim — carried forward as §10.3 build-order item 2
-  (real-host specimen), the honest close.
+- **F7 — live-transport evidence landed; foreign-host gap remains.** Fake-SSH/fake-serial shims
+  drive the transports in CI (28 tests). Beyond the shim, the ssh path now has a **live** specimen
+  against a real `sshd` (`docs/specimens/ssh-localhost.md`): `completed` + `run_failed` with true
+  exit codes (0 / 7), artifact hash matching `sha256sum -c`, v0-valid record, scrubbed
+  blob-excluding aggregate, and F1's `--expect` matched against live-observed facts. That demotes
+  the shim to lab-only. It is **localhost** — real transport, local host — so full F7 closure
+  still wants a *disposable, genuinely remote* host (§10.3 item 2) and a **live refusal** capture
+  (the sentinel-never-returns path is still shim-only).
 - **F1 — CLOSED** (working tree, uncommitted). Porter now computes `fact_mismatches` itself:
   `record.compute_fact_mismatches` / `refresh_fact_mismatches` is the *sole writer*, comparing a
   new caller-declared `substrate.declared_facts` against probed `observed` only for facts present
