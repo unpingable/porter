@@ -35,6 +35,25 @@ def parse_env(env_list: list[str] | None) -> dict[str, str]:
     return result
 
 
+def parse_expect(expect_list: list[str] | None) -> dict[str, str]:
+    """Parse ['os=darwin', ...] into declared expected host facts; empty → {}.
+
+    These are the caller's *claims* about the substrate; Porter compares them to
+    what it observes and computes fact_mismatches itself (never a verdict).
+    """
+    if not expect_list:
+        return {}
+    result: dict[str, str] = {}
+    for item in expect_list:
+        if "=" not in item:
+            raise ValueError(f"--expect requires KEY=VAL format, got: {item!r}")
+        key, _, value = item.partition("=")
+        if not key:
+            raise ValueError(f"--expect requires a non-empty key, got: {item!r}")
+        result[key] = value
+    return result
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="porter")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -46,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--push", action="append", default=[], help="local file/tree to push")
     run_p.add_argument("--pull", action="append", default=[], help="remote path/glob to pull from workdir")
     run_p.add_argument("--env", action="append", default=[], metavar="KEY=VAL", help="set env var before command (repeatable); keys recorded, values never stored")
+    run_p.add_argument("--expect", action="append", default=[], metavar="KEY=VAL", help="declare an expected host fact, e.g. os=darwin (repeatable); Porter computes fact_mismatches vs observed")
     run_p.add_argument("--worktree", action="store_true", help="push the dirty working tree instead of git archive HEAD")
     run_p.add_argument("--propagate-exit", action="store_true", help="return payload exit for run_failed")
     run_p.add_argument("--preserve", action="store_true", help="preserve recipe-created substrate instead of invoking teardown")
@@ -55,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_runs_dir(up_p)
     up_p.add_argument("target", help="target substrate: ssh:<host>, serial:<unix-socket-path>, or recipe:<script-path>")
     up_p.add_argument("--remote-root", help="remote custody root; defaults to /tmp/porter-<run_id>")
+    up_p.add_argument("--expect", action="append", default=[], metavar="KEY=VAL", help="declare an expected host fact, e.g. os=darwin (repeatable); Porter computes fact_mismatches vs observed")
 
     push_p = sub.add_parser("push", help="push a local file/tree to the substrate")
     add_runs_dir(push_p)
@@ -107,6 +128,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         remote_root=args.remote_root,
         preserve=args.preserve,
         env=parse_env(args.env) or None,
+        expect=parse_expect(args.expect) or None,
         worktree=args.worktree,
     )
     print(record["run_id"])
@@ -114,7 +136,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_up(args: argparse.Namespace) -> int:
-    run_id, record = runner.up(args.target, Path(args.runs_dir), args.remote_root)
+    run_id, record = runner.up(
+        args.target, Path(args.runs_dir), args.remote_root, parse_expect(args.expect) or None
+    )
     print(run_id)
     return 0 if record.get("outcome") not in {records.OUTCOME_REFUSED, records.OUTCOME_PORTER_FAILED} else 1
 

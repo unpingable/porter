@@ -221,6 +221,27 @@ class RecordContractTests(unittest.TestCase):
         records.mark_porter_failed(porter_failed, "transport failed")
         self.assertEqual(runner.process_exit_for(porter_failed), 1)
 
+    # ── F1: Porter-computed fact_mismatches (declared vs observed) ──────────
+
+    def test_fact_mismatches_match_yields_zero(self) -> None:
+        observed = {"os": "Linux", "arch": "x86_64", "hostname": "h1"}
+        declared = {"os": "Linux", "arch": "x86_64"}
+        self.assertEqual(records.compute_fact_mismatches(declared, observed), [])
+
+    def test_fact_mismatches_mismatch_is_emitted(self) -> None:
+        observed = {"os": "Linux", "arch": "x86_64"}
+        declared = {"os": "Darwin", "arch": "x86_64"}
+        self.assertEqual(
+            records.compute_fact_mismatches(declared, observed),
+            [{"fact": "os", "declared": "Darwin", "observed": "Linux"}],
+        )
+
+    def test_fact_mismatches_only_compares_observed_facts(self) -> None:
+        # arch is declared but never observed → nothing to compare, not a mismatch.
+        observed = {"os": "Linux"}
+        declared = {"os": "Linux", "arch": "arm64"}
+        self.assertEqual(records.compute_fact_mismatches(declared, observed), [])
+
 
 class FakeSerialServer:
     def __init__(self, socket_path: Path) -> None:
@@ -397,6 +418,122 @@ class PorterCliTests(unittest.TestCase):
         )
         recipe.chmod(0o755)
         return recipe
+
+    def write_facts_recipe(
+        self,
+        remote_root: Path,
+        declared_facts: dict,
+        caller_mismatches: list,
+    ) -> Path:
+        """Recipe that declares expected facts and (hostilely) predeclares its own
+        fact_mismatches — used to prove the caller cannot control Porter's result."""
+        idx = len(list(self.tmp_path.glob("facts-recipe-*.py")))
+        recipe = self.tmp_path / f"facts-recipe-{idx}.py"
+        recipe.write_text(
+            textwrap.dedent(
+                f"""\
+                #!/usr/bin/env python3
+                import json
+                import sys
+
+                action = sys.argv[1]
+                run_id = sys.argv[2]
+                if action == "up":
+                    print(json.dumps({{
+                        "kind": "vm",
+                        "transport": "ssh",
+                        "ephemeral": True,
+                        "declared": {{
+                            "host": "fake",
+                            "remote_root": {str(remote_root)!r},
+                            "workdir": {str(remote_root / 'work')!r},
+                        }},
+                        "declared_facts": {json.dumps(declared_facts)},
+                        "observed": {{}},
+                        "fact_mismatches": {json.dumps(caller_mismatches)},
+                    }}))
+                elif action == "down":
+                    print("down")
+                else:
+                    sys.exit(64)
+                """
+            ),
+            encoding="utf-8",
+        )
+        recipe.chmod(0o755)
+        return recipe
+
+    def test_recipe_cannot_force_empty_fact_mismatches(self) -> None:
+        """Hostile caller declares an impossible os and forces fact_mismatches=[];
+        Porter observes the real os and computes the mismatch itself anyway."""
+        runs_dir = self.tmp_path / "facts-runs-1"
+        remote_root = self.tmp_path / "facts-remote-1"
+        recipe = self.write_facts_recipe(remote_root, {"os": "PorterNoSuchOS"}, [])
+
+        result = self.run_porter(
+            "run", "--runs-dir", str(runs_dir), "--target", f"recipe:{recipe}",
+            "--", "sh", "-c", "echo ok",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run_id = result.stdout.strip()
+        record = self.load_record(runs_dir, run_id)
+        substrate = record["substrate"]
+
+        self.assertEqual(substrate["declared_facts"], {"os": "PorterNoSuchOS"})
+        mismatches = substrate["fact_mismatches"]
+        self.assertEqual(len(mismatches), 1, f"caller forced empty; Porter must still compute: {mismatches}")
+        self.assertEqual(mismatches[0]["fact"], "os")
+        self.assertEqual(mismatches[0]["declared"], "PorterNoSuchOS")
+        self.assertEqual(mismatches[0]["observed"], substrate["observed"]["os"])
+        # A mismatch is a note, not an admission gate — the run still completes.
+        self.assertEqual(record["outcome"], "completed")
+        # Aggregate count is derived only from Porter's computed list.
+        with (runs_dir / run_id / "export" / "aggregate.json").open("r", encoding="utf-8") as f:
+            aggregate = json.load(f)
+        self.assertEqual(aggregate["substrate"]["fact_mismatch_count"], 1)
+
+    def test_recipe_predeclared_mismatches_do_not_control_result(self) -> None:
+        """Hostile caller predeclares a fabricated mismatch but declares no facts;
+        Porter computes an empty list and the caller's fabrication is discarded."""
+        runs_dir = self.tmp_path / "facts-runs-2"
+        remote_root = self.tmp_path / "facts-remote-2"
+        bogus = [{"fact": "os", "declared": "Totally", "observed": "Fabricated"}]
+        recipe = self.write_facts_recipe(remote_root, {}, bogus)
+
+        result = self.run_porter(
+            "run", "--runs-dir", str(runs_dir), "--target", f"recipe:{recipe}",
+            "--", "sh", "-c", "echo ok",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run_id = result.stdout.strip()
+        record = self.load_record(runs_dir, run_id)
+        substrate = record["substrate"]
+
+        self.assertEqual(substrate["declared_facts"], {})
+        self.assertEqual(substrate["fact_mismatches"], [], "caller's fabricated mismatch must be discarded")
+
+    def test_expect_flag_computes_ssh_fact_mismatch(self) -> None:
+        """--expect declares a host fact for a plain ssh target; Porter compares it
+        to the observed value and computes the mismatch."""
+        runs_dir = self.tmp_path / "expect-runs"
+        remote_root = self.tmp_path / "expect-remote"
+
+        result = self.run_porter(
+            "run", "--runs-dir", str(runs_dir), "--target", "ssh:fake",
+            "--remote-root", str(remote_root), "--expect", "os=PorterNoSuchOS",
+            "--", "sh", "-c", "echo ok",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run_id = result.stdout.strip()
+        record = self.load_record(runs_dir, run_id)
+        substrate = record["substrate"]
+
+        self.assertEqual(substrate["declared_facts"], {"os": "PorterNoSuchOS"})
+        self.assertEqual(len(substrate["fact_mismatches"]), 1)
+        self.assertEqual(substrate["fact_mismatches"][0]["observed"], substrate["observed"]["os"])
 
     def test_nonzero_payload_is_run_failed_but_cli_zero(self) -> None:
         runs_dir = self.tmp_path / "runs"

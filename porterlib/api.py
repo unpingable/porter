@@ -56,12 +56,13 @@ def run(
     remote_root: str | None = None,
     preserve: bool = False,
     env: dict[str, str] | None = None,
+    expect: dict[str, str] | None = None,
     worktree: bool = False,
 ) -> dict[str, Any]:
     """Run a declared command and return the final Porter record."""
     argv = _command_argv(command)
     run_root = Path(runs_dir)
-    run_id, record = runner.up(target, run_root, remote_root)
+    run_id, record = runner.up(target, run_root, remote_root, expect)
     if _is_terminal(record):
         return _finish(run_id, run_root, preserve=preserve)
 

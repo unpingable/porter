@@ -88,9 +88,13 @@ def normalize_recipe_substrate(metadata: dict[str, Any], run_id: str) -> dict[st
     transport = _require_str(metadata, "transport")
     ephemeral = _require_bool(metadata, "ephemeral")
     declared = _object_field(metadata, "declared")
+    declared_facts = _object_field(metadata, "declared_facts")
     observed = _object_field(metadata, "observed")
-    fact_mismatches = metadata.get("fact_mismatches", [])
-    if not isinstance(fact_mismatches, list):
+    # Caller-supplied fact_mismatches are UNTRUSTED and never adopted: Porter
+    # computes the authoritative list itself from declared_facts vs observed
+    # (F1). We validate the type here for a clear error, then discard the value.
+    caller_mismatches = metadata.get("fact_mismatches", [])
+    if not isinstance(caller_mismatches, list):
         raise ValueError("recipe metadata field 'fact_mismatches' must be a list")
 
     if transport == "ssh":
@@ -117,8 +121,11 @@ def normalize_recipe_substrate(metadata: dict[str, Any], run_id: str) -> dict[st
         "transport": transport,
         "ephemeral": ephemeral,
         "declared": declared,
+        "declared_facts": declared_facts,
         "observed": observed,
-        "fact_mismatches": fact_mismatches,
+        # Placeholder; Porter computes the authoritative list after it probes
+        # observed facts (see runner.up_recipe → records.refresh_fact_mismatches).
+        "fact_mismatches": [],
     }
 
 

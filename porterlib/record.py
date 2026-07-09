@@ -93,6 +93,7 @@ def new_record(run_id: str, target: str, host: str, remote_root: str) -> dict[st
                 "remote_root": remote_root,
                 "workdir": f"{remote_root}/work",
             },
+            "declared_facts": {},
             "observed": {},
             "fact_mismatches": [],
         },
@@ -117,6 +118,7 @@ def new_serial_record(run_id: str, target: str, socket_path: str) -> dict[str, A
             "transport": "serial-socket",
             "ephemeral": False,
             "declared": {"socket_path": socket_path},
+            "declared_facts": {},
             "observed": {},
             "fact_mismatches": [],
         },
@@ -141,6 +143,7 @@ def new_recipe_record(run_id: str, target: str, recipe_source: str) -> dict[str,
             "transport": "recipe",
             "ephemeral": True,
             "declared": {"recipe": recipe_source},
+            "declared_facts": {},
             "observed": {},
             "fact_mismatches": [],
         },
@@ -154,6 +157,60 @@ def new_recipe_record(run_id: str, target: str, recipe_source: str) -> dict[str,
         "preserved": False,
         "notes": "recipe target lifecycle is caller-provided",
     }
+
+
+# ── Declared-vs-observed host facts (F1) ────────────────────────────────────
+# A caller may DECLARE expected host facts (substrate.declared_facts) but never
+# dictate the result. Porter computes substrate.fact_mismatches itself, comparing
+# only a fact that is BOTH declared and observed — a note, not a verdict, and
+# never an admission gate. Caller-supplied fact_mismatches are untrusted and
+# never adopted.
+
+def compute_fact_mismatches(
+    declared_facts: Any, observed: Any
+) -> list[dict[str, Any]]:
+    if not isinstance(declared_facts, dict) or not isinstance(observed, dict):
+        return []
+    mismatches: list[dict[str, Any]] = []
+    for key in sorted(declared_facts):
+        if key not in observed:
+            continue  # cannot compare a fact Porter did not observe
+        declared_value = declared_facts[key]
+        observed_value = observed[key]
+        if str(declared_value).strip() != str(observed_value).strip():
+            mismatches.append(
+                {"fact": key, "declared": declared_value, "observed": observed_value}
+            )
+    return mismatches
+
+
+def refresh_fact_mismatches(substrate: dict[str, Any]) -> None:
+    """Recompute substrate.fact_mismatches from declared_facts vs observed.
+
+    The ONLY writer of fact_mismatches. Overwrites any caller-supplied value.
+    """
+    if not isinstance(substrate, dict):
+        return
+    substrate["fact_mismatches"] = compute_fact_mismatches(
+        substrate.get("declared_facts") or {},
+        substrate.get("observed") or {},
+    )
+
+
+def set_declared_facts(substrate: dict[str, Any], declared_facts: dict[str, Any] | None) -> None:
+    """Merge caller-declared expected facts into the substrate, then recompute.
+
+    Merges (caller wins per key) rather than replacing, so recipe-declared facts
+    and CLI --expect facts can both contribute. Always recomputes fact_mismatches.
+    """
+    if not isinstance(substrate, dict):
+        return
+    existing = substrate.get("declared_facts")
+    merged: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+    for key, value in (declared_facts or {}).items():
+        merged[str(key)] = value
+    substrate["declared_facts"] = merged
+    refresh_fact_mismatches(substrate)
 
 
 def ensure_record_schema(record: dict[str, Any]) -> None:
@@ -399,6 +456,7 @@ def _substrate_summary(substrate: Any) -> dict[str, Any]:
         return {"class": CUSTODY_RECEIPT, "scrubbed": True}
 
     declared = substrate.get("declared", {})
+    declared_facts = substrate.get("declared_facts", {})
     observed = substrate.get("observed", {})
     mismatches = substrate.get("fact_mismatches", [])
     return {
@@ -407,6 +465,7 @@ def _substrate_summary(substrate: Any) -> dict[str, Any]:
         "transport": substrate.get("transport"),
         "ephemeral": substrate.get("ephemeral"),
         "declared_keys": sorted(declared) if isinstance(declared, dict) else [],
+        "declared_fact_keys": sorted(declared_facts) if isinstance(declared_facts, dict) else [],
         "observed_keys": sorted(observed) if isinstance(observed, dict) else [],
         "fact_mismatch_count": len(mismatches) if isinstance(mismatches, list) else None,
         "scrubbed": True,

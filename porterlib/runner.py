@@ -71,25 +71,36 @@ def parse_observed(stdout: bytes) -> dict[str, str]:
     return observed
 
 
-def up(target: str, runs_dir: Path, remote_root: str | None = None) -> tuple[str, dict[str, Any]]:
+def up(
+    target: str,
+    runs_dir: Path,
+    remote_root: str | None = None,
+    declared_facts: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
     if target.startswith("ssh:"):
-        return up_ssh(target, runs_dir, remote_root)
+        return up_ssh(target, runs_dir, remote_root, declared_facts)
     if target.startswith("serial:"):
-        return up_serial(target, runs_dir)
+        return up_serial(target, runs_dir, declared_facts)
     if target.startswith("recipe:"):
-        return up_recipe(target, runs_dir)
+        return up_recipe(target, runs_dir, declared_facts)
     raise ValueError(
         f"unsupported target {target!r}; expected ssh:<host>, serial:<unix-socket-path>, or recipe:<script-path>"
     )
 
 
-def up_ssh(target: str, runs_dir: Path, remote_root: str | None = None) -> tuple[str, dict[str, Any]]:
+def up_ssh(
+    target: str,
+    runs_dir: Path,
+    remote_root: str | None = None,
+    declared_facts: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
     host = parse_ssh_target(target)
     run_id = records.new_run_id()
     remote_root = remote_root or default_remote_root(run_id)
     base = records.run_dir(runs_dir, run_id)
     records.ensure_layout(base)
     record = records.new_record(run_id, target, host, remote_root)
+    records.set_declared_facts(record["substrate"], declared_facts)
     records.save_record(base, record)
 
     transport = SSHTransport(host)
@@ -110,16 +121,22 @@ printf 'arch=%s\n' "$(uname -m 2>/dev/null || true)"
         records.mark_refused(record, reason)
     else:
         record["substrate"]["observed"] = parse_observed(result.stdout)
+        records.refresh_fact_mismatches(record["substrate"])
     records.save_record(base, record)
     return run_id, record
 
 
-def up_serial(target: str, runs_dir: Path) -> tuple[str, dict[str, Any]]:
+def up_serial(
+    target: str,
+    runs_dir: Path,
+    declared_facts: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
     socket_path = parse_serial_target(target)
     run_id = records.new_run_id()
     base = records.run_dir(runs_dir, run_id)
     records.ensure_layout(base)
     record = records.new_serial_record(run_id, target, socket_path)
+    records.set_declared_facts(record["substrate"], declared_facts)
     records.save_record(base, record)
 
     try:
@@ -128,6 +145,7 @@ def up_serial(target: str, runs_dir: Path) -> tuple[str, dict[str, Any]]:
         records.mark_refused(record, f"could not open serial socket: {exc}")
     else:
         record["substrate"]["observed"] = {"socket_path": socket_path}
+        records.refresh_fact_mismatches(record["substrate"])
     records.save_record(base, record)
     return run_id, record
 
@@ -171,7 +189,11 @@ printf 'arch=%s\n' "$(uname -m 2>/dev/null || true)"
     return f"unsupported recipe transport: {transport or 'unknown'}"
 
 
-def up_recipe(target: str, runs_dir: Path) -> tuple[str, dict[str, Any]]:
+def up_recipe(
+    target: str,
+    runs_dir: Path,
+    declared_facts: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
     source = parse_recipe_target(target)
     run_id = records.new_run_id()
     base = records.run_dir(runs_dir, run_id)
@@ -238,9 +260,14 @@ def up_recipe(target: str, runs_dir: Path) -> tuple[str, dict[str, Any]]:
         return run_id, record
 
     record["preserved"] = record["substrate"].get("ephemeral") is not True
+    # Merge any CLI --expect facts over the recipe-declared facts, then probe.
+    records.set_declared_facts(record["substrate"], declared_facts)
     refusal = probe_declared_transport(record)
     if refusal is not None:
         records.mark_refused(record, refusal)
+    # Porter computes the authoritative fact_mismatches now that observed facts
+    # are probed — the recipe's own declaration never controls the result (F1).
+    records.refresh_fact_mismatches(record["substrate"])
     records.save_record(base, record)
     return run_id, record
 

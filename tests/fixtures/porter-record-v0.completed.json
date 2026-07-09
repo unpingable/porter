@@ -40,6 +40,7 @@
       "remote_root": "/tmp/porter-fixture",
       "workdir": "/tmp/porter-fixture/work"
     },
+    "declared_facts": {},
     "ephemeral": false,
     "fact_mismatches": [],
     "kind": "ssh",
