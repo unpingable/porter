@@ -603,11 +603,15 @@ across many is the framework §1 forbids. House-style gloss:
 Named early because retrofit cost rises once backends multiply — these are exactly the
 APIs / schemas / wire formats to record *before* they spread, not build now.
 
-- **C1 — Adapter seam.** Today `runner.py` branches on target prefix (`ssh:`/`serial:`/`recipe:`)
-  — fine at this size, ugly once Docker/Podman/Firecracker arrive. Candidate behavior-preserving
-  interface `SubstrateAdapter{ up, push, exec, pull, down, observe, capabilities }`, one module
-  per adapter under `porterlib/adapters/`. Acceptance: same CLI, same records, same golden
-  fixtures, no schema change *unless capability metadata is added deliberately*.
+- **C1 — Adapter seam. LANDED** (behavior-preserving). `porterlib/adapters/` now holds a
+  `SubstrateAdapter{ observe, exec_command, push, pull }` interface + `SSHAdapter` / `SerialAdapter`,
+  routed by `adapter_for_record` on the record's transport. Scoped to **post-shell** ops only —
+  `up`/provisioning stays in `runner` per §1 ("abstract only what happens after you have a shell");
+  `recipe` is a target that resolves to ssh/serial, not its own adapter. Each adapter declares
+  `supports_push`/`supports_pull` (class attributes, **not** written to the record — pre-figures
+  C2 without a schema change). Acceptance met: same CLI, same records/golden fixtures, 28 tests
+  green, live re-check against real `sshd`. Not moved: `up_*`, capability metadata in the record
+  (C2), any new transport.
 - **C2 — Capability model.** Each adapter *declares* what it supports rather than implying it —
   transport truth, not governance: `push / pull / exec / env / teardown / resource_limits /
   network_policy / teardown_attestation`. Without it Porter eventually **lies by omission** (ssh

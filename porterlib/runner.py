@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import functools
-import re
-import secrets
 import shlex
 from pathlib import Path
 from typing import Any, Callable
 
 from . import record as records
+from .adapters import (
+    adapter_for_record,
+    parse_observed,
+    record_transport,
+)
 from .recipe import (
     copy_recipe,
     normalize_recipe_substrate,
@@ -17,10 +20,7 @@ from .recipe import (
     run_recipe_hook,
 )
 from .serial import SerialConsole, parse_serial_target
-from .ssh import SSHTransport, git_archive_or_tar, is_dirty_worktree, make_tar_bytes, parse_target as parse_ssh_target, safe_extract_tar_bytes, shell_join
-
-
-SENTINEL_PREFIX = "__PORTER_RC_"
+from .ssh import SSHTransport, parse_target as parse_ssh_target
 
 
 class PorterError(Exception):
@@ -61,34 +61,9 @@ def default_remote_root(run_id: str) -> str:
     return f"/tmp/porter-{run_id}"
 
 
-def record_transport(record: dict[str, Any]) -> str:
-    return str(record.get("substrate", {}).get("transport", ""))
-
-
-def remote_workdir(record: dict[str, Any]) -> str:
-    return str(record["substrate"]["declared"]["workdir"])
-
-
-def ssh_transport_for_record(record: dict[str, Any]) -> SSHTransport:
-    host = str(record["substrate"]["declared"]["host"])
-    return SSHTransport(host)
-
-
-def serial_console_for_record(record: dict[str, Any]) -> SerialConsole:
-    socket_path = str(record["substrate"]["declared"]["socket_path"])
-    return SerialConsole(socket_path)
-
-
-def parse_observed(stdout: bytes) -> dict[str, str]:
-    observed: dict[str, str] = {}
-    for raw in stdout.decode("utf-8", errors="replace").splitlines():
-        if "=" not in raw:
-            continue
-        key, value = raw.split("=", 1)
-        if key in {"hostname", "os", "kernel", "arch"}:
-            observed[key] = value
-    return observed
-
+# ── Provisioning (`up`) — deliberately NOT behind the adapter seam ─────────────
+# DESIGN §1: "abstract only what happens after you have a shell." Getting a shell
+# is per-substrate; the post-shell ops (exec/push/pull/observe) live in adapters.
 
 def up(
     target: str,
@@ -169,43 +144,17 @@ def up_serial(
     return run_id, record
 
 
-
-
 def write_hook_transcript(base: Path, rel: str, stdout: bytes, stderr: bytes) -> None:
     payload = b"--- stdout ---\n" + stdout + b"--- stderr ---\n" + stderr
     (base / rel).write_bytes(payload)
 
 
 def probe_declared_transport(record: dict[str, Any]) -> str | None:
-    transport = record_transport(record)
-    if transport == "ssh":
-        workdir = remote_workdir(record)
-        script = f"""
-set -u
-mkdir -p {shlex.quote(workdir)}
-printf 'hostname=%s\n' "$(hostname 2>/dev/null || true)"
-printf 'os=%s\n' "$(uname -s 2>/dev/null || true)"
-printf 'kernel=%s\n' "$(uname -r 2>/dev/null || true)"
-printf 'arch=%s\n' "$(uname -m 2>/dev/null || true)"
-"""
-        result = ssh_transport_for_record(record).run_script(script)
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout).decode("utf-8", errors="replace").strip()
-            return "could not obtain recipe ssh shell" + (f": {detail}" if detail else "")
-        observed = dict(record["substrate"].get("observed", {}))
-        observed.update(parse_observed(result.stdout))
-        record["substrate"]["observed"] = observed
-        return None
-    if transport == "serial-socket":
-        try:
-            serial_console_for_record(record).probe()
-        except OSError as exc:
-            return f"could not open recipe serial socket: {exc}"
-        observed = dict(record["substrate"].get("observed", {}))
-        observed.setdefault("socket_path", record["substrate"]["declared"]["socket_path"])
-        record["substrate"]["observed"] = observed
-        return None
-    return f"unsupported recipe transport: {transport or 'unknown'}"
+    """Probe the observed identity of a recipe-yielded substrate via its adapter."""
+    adapter = adapter_for_record(record)
+    if adapter is None:
+        return f"unsupported recipe transport: {record_transport(record) or 'unknown'}"
+    return adapter.observe(record)
 
 
 def up_recipe(
@@ -313,103 +262,16 @@ def mark_unsupported_transport_step(record: dict[str, Any], base: Path, *, kind:
     return record
 
 
+# ── Post-shell ops — routed to the substrate adapter for the record's transport ──
+
 @with_run_lock
 def push(run_id: str, runs_dir: Path, src: Path, dst: str | None = None, *, worktree: bool = False) -> dict[str, Any]:
     base = resolve_run_base(runs_dir, run_id)
     record = records.load_record(base)
-    if record_transport(record) != "ssh":
+    adapter = adapter_for_record(record)
+    if adapter is None or not adapter.supports_push:
         return mark_unsupported_transport_step(record, base, kind="push", declared=f"push {src} {dst or ''}".strip())
-
-    transport = ssh_transport_for_record(record)
-    remote_dst = dst or remote_workdir(record)
-    if not remote_dst.startswith("/"):
-        remote_dst = f"{record['substrate']['declared']['remote_root'].rstrip('/')}/{remote_dst}"
-
-    seq = records.next_seq(record)
-    transcript = records.transcript_rel(seq, "push")
-    started = records.utc_now()
-    dirty_worktree: bool | None = None
-    try:
-        if worktree:
-            tar_bytes = make_tar_bytes(src)
-            method = "tar (worktree)"
-        else:
-            tar_bytes, method = git_archive_or_tar(src)
-            if method.startswith("git archive"):
-                dirty_worktree = is_dirty_worktree(src)
-        result = transport.push_tar_stream(remote_dst, tar_bytes)
-    except Exception as exc:  # noqa: BLE001 - record courier failure instead of hiding it.
-        ended = records.utc_now()
-        (base / transcript).write_text(f"porter push failed: {exc}\n", encoding="utf-8")
-        records.add_step(
-            record,
-            kind="push",
-            declared=f"push {src} {remote_dst}",
-            started_at=started,
-            ended_at=ended,
-            transcript=transcript,
-            exit_code_observed=True,
-            exit_code=1,
-            extra={"remote_dst": remote_dst},
-        )
-        records.mark_porter_failed(record, str(exc))
-        records.save_record(base, record)
-        return record
-
-    ended = records.utc_now()
-    transcript_bytes = result.stdout + result.stderr
-    (base / transcript).write_bytes(transcript_bytes)
-    push_extra: dict[str, Any] = {"remote_dst": remote_dst}
-    if dirty_worktree is True:
-        push_extra["dirty_worktree"] = True
-    records.add_step(
-        record,
-        kind="push",
-        declared=f"{method} {src} -> {remote_dst}",
-        started_at=started,
-        ended_at=ended,
-        transcript=transcript,
-        exit_code_observed=True,
-        exit_code=result.returncode,
-        extra=push_extra,
-    )
-    if result.returncode != 0:
-        records.mark_porter_failed(record, f"push failed with exit code {result.returncode}")
-    records.save_record(base, record)
-    return record
-
-
-def build_exec_script(workdir: str, command: list[str], token: str, env: dict[str, str] | None = None) -> str:
-    command_string = shell_join(command)
-    env_lines = (
-        "\n".join(f"export {k}={shlex.quote(v)}" for k, v in env.items()) + "\n"
-        if env
-        else ""
-    )
-    return f"""
-{env_lines}cd {shlex.quote(workdir)} || exit 125
-(
-  {command_string}
-)
-__porter_rc=$?
-printf '\n{token}:%s\n' "$__porter_rc"
-"""
-
-
-def build_serial_exec_line(command: list[str], token: str, env: dict[str, str] | None = None) -> str:
-    command_string = shell_join(command)
-    env_prefix = "".join(f"export {k}={shlex.quote(v)}; " for k, v in env.items()) if env else ""
-    return f"{env_prefix}({command_string}); __porter_rc=$?; printf '\\n{token}:%s\\n' \"$__porter_rc\""
-
-
-def parse_exec_result(transcript: bytes, token: str) -> tuple[bool, int | None]:
-    pattern = re.compile(rb"^" + re.escape(token.encode("ascii")) + rb":([0-9]{1,3})\s*$")
-    rc: int | None = None
-    for line in transcript.splitlines():
-        match = pattern.match(line)
-        if match:
-            rc = int(match.group(1))
-    return (rc is not None), rc
+    return adapter.push(record, base, src, dst, worktree=worktree)
 
 
 @with_run_lock
@@ -418,173 +280,20 @@ def exec_command(run_id: str, runs_dir: Path, command: list[str], env: dict[str,
         raise PorterError("exec requires a command after --")
     base = resolve_run_base(runs_dir, run_id)
     record = records.load_record(base)
-    transport = record_transport(record)
-    if transport == "ssh":
-        return exec_ssh_command(record, base, command, env)
-    if transport == "serial-socket":
-        return exec_serial_command(record, base, command, env)
-    raise PorterError(f"unsupported transport in record: {transport or 'unknown'}")
-
-
-def exec_ssh_command(record: dict[str, Any], base: Path, command: list[str], env: dict[str, str] | None = None) -> dict[str, Any]:
-    transport = ssh_transport_for_record(record)
-    token = f"{SENTINEL_PREFIX}{secrets.token_hex(8)}__"
-    script = build_exec_script(remote_workdir(record), command, token, env)
-    seq = records.next_seq(record)
-    transcript = records.transcript_rel(seq, "exec")
-
-    started = records.utc_now()
-    result = transport.run_script_combined(script)
-    ended = records.utc_now()
-    transcript_bytes = result.stdout
-    (base / transcript).write_bytes(transcript_bytes)
-    observed, rc = parse_exec_result(transcript_bytes, token)
-
-    extra: dict[str, Any] = {}
-    if env:
-        extra["env_keys"] = sorted(env.keys())
-    records.add_step(
-        record,
-        kind="exec",
-        declared=shell_join(command),
-        started_at=started,
-        ended_at=ended,
-        transcript=transcript,
-        exit_code=rc,
-        exit_code_observed=observed,
-        extra=extra or None,
-    )
-    record["declared_command"] = command
-    if not observed:
-        records.mark_refused(record, f"command exit code was not observed; ssh exited {result.returncode}")
-    records.save_record(base, record)
-    return record
-
-
-def exec_serial_command(record: dict[str, Any], base: Path, command: list[str], env: dict[str, str] | None = None) -> dict[str, Any]:
-    console = serial_console_for_record(record)
-    token = f"{SENTINEL_PREFIX}{secrets.token_hex(8)}__"
-    line = build_serial_exec_line(command, token, env)
-    seq = records.next_seq(record)
-    transcript = records.transcript_rel(seq, "exec")
-
-    started = records.utc_now()
-    try:
-        result = console.run_line_until_token(line, token)
-    except OSError as exc:
-        ended = records.utc_now()
-        (base / transcript).write_text(f"porter serial exec failed: {exc}\n", encoding="utf-8")
-        extra: dict[str, Any] = {}
-        if env:
-            extra["env_keys"] = sorted(env.keys())
-        records.add_step(
-            record,
-            kind="exec",
-            declared=shell_join(command),
-            started_at=started,
-            ended_at=ended,
-            transcript=transcript,
-            exit_code_observed=False,
-            extra=extra or None,
-        )
-        record["declared_command"] = command
-        records.mark_refused(record, f"could not run command on serial socket: {exc}")
-        records.save_record(base, record)
-        return record
-
-    ended = records.utc_now()
-    (base / transcript).write_bytes(result.transcript)
-    observed, rc = parse_exec_result(result.transcript, token)
-
-    extra2: dict[str, Any] = {}
-    if env:
-        extra2["env_keys"] = sorted(env.keys())
-    records.add_step(
-        record,
-        kind="exec",
-        declared=shell_join(command),
-        started_at=started,
-        ended_at=ended,
-        transcript=transcript,
-        exit_code=rc,
-        exit_code_observed=observed,
-        extra=extra2 or None,
-    )
-    record["declared_command"] = command
-    if not observed:
-        reason = "command exit code was not observed over serial socket"
-        if result.timed_out:
-            reason = f"{reason} before timeout"
-        elif result.ended_by_eof:
-            reason = f"{reason} before console closed"
-        records.mark_refused(record, reason)
-    records.save_record(base, record)
-    return record
+    adapter = adapter_for_record(record)
+    if adapter is None:
+        raise PorterError(f"unsupported transport in record: {record_transport(record) or 'unknown'}")
+    return adapter.exec_command(record, base, command, env)
 
 
 @with_run_lock
 def pull(run_id: str, runs_dir: Path, remote_glob: str, local: str | None = None) -> dict[str, Any]:
     base = resolve_run_base(runs_dir, run_id)
     record = records.load_record(base)
-    if record_transport(record) != "ssh":
+    adapter = adapter_for_record(record)
+    if adapter is None or not adapter.supports_pull:
         return mark_unsupported_transport_step(record, base, kind="pull", declared=f"pull {remote_glob}")
-
-    transport = ssh_transport_for_record(record)
-    artifact_root = base / "artifacts"
-    if local:
-        artifact_root = artifact_root / local
-    artifact_root.mkdir(parents=True, exist_ok=True)
-
-    seq = records.next_seq(record)
-    transcript = records.transcript_rel(seq, "pull")
-    started = records.utc_now()
-    result = transport.pull_tar_stream(remote_workdir(record), remote_glob)
-    ended = records.utc_now()
-
-    transcript_bytes = result.stderr
-    (base / transcript).write_bytes(transcript_bytes)
-    records.add_step(
-        record,
-        kind="pull",
-        declared=f"pull {remote_glob}",
-        started_at=started,
-        ended_at=ended,
-        transcript=transcript,
-        exit_code_observed=True,
-        exit_code=result.returncode,
-        extra={"remote_glob": remote_glob},
-    )
-    if result.returncode != 0:
-        records.mark_refused(record, f"requested artifact was not available: {remote_glob}")
-        records.save_record(base, record)
-        return record
-
-    try:
-        extracted = safe_extract_tar_bytes(result.stdout, artifact_root)
-    except Exception as exc:  # noqa: BLE001 - unsafe tar output is a courier refusal.
-        records.mark_refused(record, f"could not extract pulled artifact: {exc}")
-        records.save_record(base, record)
-        return record
-
-    if not extracted:
-        records.mark_refused(record, f"requested artifact produced no files: {remote_glob}")
-        records.save_record(base, record)
-        return record
-
-    for path in extracted:
-        rel = path.relative_to(base).as_posix()
-        remote_path = path.relative_to(artifact_root).as_posix()
-        record.setdefault("artifacts", []).append(
-            {
-                "class": records.CUSTODY_BLOB,
-                "remote_path": remote_path,
-                "local_path": rel,
-                "sha256": records.sha256_file(path),
-                "size": records.file_size(path),
-            }
-        )
-    records.save_record(base, record)
-    return record
+    return adapter.pull(record, base, remote_glob, local)
 
 
 @with_run_lock
