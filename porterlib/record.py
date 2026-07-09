@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import secrets
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from . import __version__
+
+RUN_LOCK_NAME = ".lock"
 
 
 OUTCOME_COMPLETED = "completed"
@@ -52,6 +56,35 @@ CUSTODY_CLASSES = frozenset({CUSTODY_RECIPE, CUSTODY_RECEIPT, CUSTODY_BLOB})
 
 class RecordContractError(ValueError):
     pass
+
+
+class RunLockedError(RuntimeError):
+    """Another process holds the run's lock. Steps are sequential by contract
+    (DESIGN §8 Q2); Porter refuses to load-append-save a run in flight rather
+    than silently clobber a concurrent step."""
+
+
+@contextmanager
+def run_lock(base: Path) -> Iterator[None]:
+    """Fail-fast advisory lock over a single run dir, held across load→save.
+
+    POSIX flock (Linux/macOS/BSD — Porter's courier hosts). Fail-fast, not
+    blocking: a second process on the same run_id gets RunLockedError, so
+    'one process per run_id' is enforced instead of assumed.
+    """
+    base.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(base / RUN_LOCK_NAME), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise RunLockedError(f"run is locked by another process: {base.name}") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 def utc_now() -> str:
@@ -623,7 +656,7 @@ def iter_checksum_files(base: Path) -> list[Path]:
         root_path = Path(root)
         for name in names:
             path = root_path / name
-            if path == base / "SHA256SUMS":
+            if path == base / "SHA256SUMS" or path == base / RUN_LOCK_NAME:
                 continue
             files.append(path)
     return sorted(files, key=lambda p: p.relative_to(base).as_posix())

@@ -206,6 +206,9 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_show(args)
         if args.command == "ls":
             return cmd_ls(args)
+    except records.RunLockedError as exc:
+        print(f"porter: {exc}", file=sys.stderr)
+        return 2
     except runner.PorterError as exc:
         print(f"porter: {exc}", file=sys.stderr)
         return 2

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import functools
 import re
 import secrets
 import shlex
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import record as records
 from .recipe import (
@@ -31,6 +32,24 @@ def resolve_run_base(runs_dir: Path, run_id: str) -> Path:
     if not records.record_path(base).exists():
         raise PorterError(f"run not found: {run_id}")
     return base
+
+
+def with_run_lock(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Serialize a mutating step over its run dir (F5 / DESIGN §8 Q2).
+
+    Wraps commands whose shape is load→append→save on an existing run_id; a
+    concurrent process on the same run raises records.RunLockedError instead of
+    clobbering the first process's step. `up` is not wrapped — it mints a fresh
+    run_id, so it never contends.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(run_id: str, runs_dir: Path, *args: Any, **kwargs: Any) -> Any:
+        base = resolve_run_base(runs_dir, run_id)
+        with records.run_lock(base):
+            return fn(run_id, runs_dir, *args, **kwargs)
+
+    return wrapper
 
 
 def load_record(run_id: str, runs_dir: Path) -> dict[str, Any]:
@@ -294,6 +313,7 @@ def mark_unsupported_transport_step(record: dict[str, Any], base: Path, *, kind:
     return record
 
 
+@with_run_lock
 def push(run_id: str, runs_dir: Path, src: Path, dst: str | None = None, *, worktree: bool = False) -> dict[str, Any]:
     base = resolve_run_base(runs_dir, run_id)
     record = records.load_record(base)
@@ -392,6 +412,7 @@ def parse_exec_result(transcript: bytes, token: str) -> tuple[bool, int | None]:
     return (rc is not None), rc
 
 
+@with_run_lock
 def exec_command(run_id: str, runs_dir: Path, command: list[str], env: dict[str, str] | None = None) -> dict[str, Any]:
     if not command:
         raise PorterError("exec requires a command after --")
@@ -501,6 +522,7 @@ def exec_serial_command(record: dict[str, Any], base: Path, command: list[str], 
     return record
 
 
+@with_run_lock
 def pull(run_id: str, runs_dir: Path, remote_glob: str, local: str | None = None) -> dict[str, Any]:
     base = resolve_run_base(runs_dir, run_id)
     record = records.load_record(base)
@@ -565,11 +587,13 @@ def pull(run_id: str, runs_dir: Path, remote_glob: str, local: str | None = None
     return record
 
 
+@with_run_lock
 def seal(run_id: str, runs_dir: Path) -> dict[str, Any]:
     base = resolve_run_base(runs_dir, run_id)
     return records.seal_run(base)
 
 
+@with_run_lock
 def down(run_id: str, runs_dir: Path, preserve: bool = False) -> dict[str, Any]:
     base = resolve_run_base(runs_dir, run_id)
     record = records.load_record(base)

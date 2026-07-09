@@ -242,6 +242,28 @@ class RecordContractTests(unittest.TestCase):
         declared = {"os": "Linux", "arch": "arm64"}
         self.assertEqual(records.compute_fact_mismatches(declared, observed), [])
 
+    # ── F5: run-state locking ──────────────────────────────────────────────
+
+    def test_run_lock_is_exclusive_then_reacquirable(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            records.ensure_layout(base)
+            with records.run_lock(base):
+                with self.assertRaises(records.RunLockedError):
+                    with records.run_lock(base):
+                        pass
+            # released on exit → acquirable again (steps are sequential, not blocked forever)
+            with records.run_lock(base):
+                pass
+
+    def test_run_lock_file_is_excluded_from_checksums(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            records.ensure_layout(base)
+            (base / records.RUN_LOCK_NAME).write_bytes(b"")
+            names = {p.name for p in records.iter_checksum_files(base)}
+            self.assertNotIn(records.RUN_LOCK_NAME, names)
+
 
 class FakeSerialServer:
     def __init__(self, socket_path: Path) -> None:
@@ -534,6 +556,25 @@ class PorterCliTests(unittest.TestCase):
         self.assertEqual(substrate["declared_facts"], {"os": "PorterNoSuchOS"})
         self.assertEqual(len(substrate["fact_mismatches"]), 1)
         self.assertEqual(substrate["fact_mismatches"][0]["observed"], substrate["observed"]["os"])
+
+    def test_exec_on_locked_run_is_refused_not_clobbered(self) -> None:
+        """A second mutating op on a run whose lock is held refuses (RunLockedError)
+        rather than load-append-save over the holder's step (F5)."""
+        runs_dir = self.tmp_path / "lock-runs"
+        remote_root = self.tmp_path / "lock-remote"
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = f"{self.fakebin}{os.pathsep}{old_path}"
+        try:
+            run_id, _ = runner.up("ssh:fake", runs_dir, str(remote_root))
+            base = runs_dir / run_id
+            with records.run_lock(base):
+                with self.assertRaises(records.RunLockedError):
+                    runner.exec_command(run_id, runs_dir, ["sh", "-c", "echo hi"])
+            # lock released → the same op now succeeds (sequential access still works)
+            record = runner.exec_command(run_id, runs_dir, ["sh", "-c", "echo hi"])
+            self.assertTrue(any(s["kind"] == "exec" for s in record["steps"]))
+        finally:
+            os.environ["PATH"] = old_path
 
     def test_nonzero_payload_is_run_failed_but_cli_zero(self) -> None:
         runs_dir = self.tmp_path / "runs"

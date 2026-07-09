@@ -386,6 +386,8 @@ that reads as "never."
    Revisit only if the *same* lifecycle path repeats enough to justify lifting.
 2. **Run-state persistence.** The stepwise CLI needs run state across process invocations.
    Slice 1 must define the minimal `runs/<run_id>/` state dir and its update/locking behavior.
+   *Resolved (F5, §9): a fail-fast `runs/<run_id>/.lock` flock serializes mutating commands;
+   one process per `run_id`, else `RunLockedError`.*
 3. **Completeness boundary ("done enough").** Porter is an instrument, not a product platform
    (it may not even be a public repo). It is done when it reliably couriers the substrates we
    **actually use** — current NQ/AG/Lean/dev needs — **not** when it becomes a general
@@ -525,8 +527,16 @@ rewritten — only annotated.
   `test_recipe_cannot_force_empty_fact_mismatches`,
   `test_recipe_predeclared_mismatches_do_not_control_result`, `test_expect_flag_computes_ssh_fact_mismatch`
   (25 passed). No schema-breaking rename — `declared_facts` is additive to `porter.record.v0`.
-- **F4, F5 — OPEN, fenced.** In-memory transcript (F4) and run-state locking (F5) stand as
-  written; F4 folds into the §10 adapter/transport work.
+- **F5 — CLOSED** (working tree). `records.run_lock` is a fail-fast POSIX `flock` over
+  `runs/<run_id>/.lock`, held across load→save; the mutating commands (`push`/`exec`/`pull`/
+  `seal`/`down`) are wrapped by `runner.with_run_lock`, so a second process on the same
+  `run_id` raises `RunLockedError` (clean nonzero exit) instead of clobbering a step. `up` is
+  unwrapped — it mints a fresh `run_id`, so it never contends. The `.lock` file is excluded
+  from `SHA256SUMS` (transient run state, not custody). Answers open question Q2 (§8). Tests:
+  `test_run_lock_is_exclusive_then_reacquirable`, `test_run_lock_file_is_excluded_from_checksums`,
+  `test_exec_on_locked_run_is_refused_not_clobbered`.
+- **F4 — OPEN, fenced.** In-memory transcript buffering stands as written; folds into the §10
+  adapter/transport work.
 
 ## 10. Substrate-adapter direction (recorded 2026-07-09)
 
