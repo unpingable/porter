@@ -668,3 +668,142 @@ contract before an abstraction is frozen:
 Scope-control anchor, recorded verbatim: *Porter does not need a new project. It needs an
 adapter seam, capability/refusal vocabulary, real-host evidence, then a container specimen. The
 cursed k8s trap starts the moment it grows node state.*
+
+## 11. Qualification-run governance (recorded 2026-07-19)
+
+Operator-directed, recorded per *name early, ratify lazily*. **A handle for review, not
+authorization to build.** One item is recorded as **binding doctrine** — §11.1, the verdict
+layering — because it is the law that keeps a courier from greenwashing a refusal. The rest
+are candidate surfaces: named so they are not rediscovered per-campaign, non-binding until a
+forcing case and testable acceptance justify each one.
+
+Origin: a real VM qualification campaign run through hand-rolled harness scripts (see §11.4).
+The campaign kept re-deriving machinery that is not product-specific. That machinery is
+Porter-grade; the product's gates are not.
+
+### 11.1 Verdict layering — transport completion is not a governed verdict  [binding]
+
+Porter already refuses to let `ssh 255` read as success. Generalize it: an execution stack has
+**more than one** honest outcome, and the outer ones must never overwrite the inner ones.
+
+```
+transport outcome      — did the carrier (ssh, wrapper, background task) complete?
+harness verdict        — did the declared gate sequence run to completion?
+qualification verdict  — did the profile's gates pass?
+```
+
+> **A completed carrier testifies only that the carrier ran. It never testifies to what it
+> carried.**
+
+The firing case is embarrassingly ordinary: a background wrapper exits `0` because the wrapper
+finished, while the harness inside it returned `1` because qualification refused. Any layer
+that reports the outermost status as *the* status has laundered a refusal into a pass. Porter
+should model these as distinct recorded fields, not teach every caller to rediscover shell
+exit-code semantics.
+
+Corollary, and the reason this is binding rather than candidate:
+
+> **Only a fully completed, sealed qualification run may produce promotion evidence. A refused
+> or diagnostic run may produce knowledge, but never authority.**
+
+Note the boundary this does *not* cross. Porter does not decide what "qualified" means — the
+profile does. Porter enforces the **negative**: it must not emit a sealed qualification receipt
+when the declared gate sequence did not complete. That is custody discipline, not standing.
+
+### 11.2 Candidate surfaces (named, non-binding)
+
+**Exact input custody.** Source revision plus tree cleanliness; substrate image digest and
+provenance; payload/package digest; harness identity; declared host capabilities. One rule has
+teeth: **a digest recorded for previously-fetched mutable upstream bytes must never be reused
+to declare newly-fetched bytes.** Upstream `current` images are re-spun in place; the receipt
+must name what actually ran, not what once ran.
+
+**Resource-envelope preflight.** A run that cannot satisfy its own declared resource envelope
+must refuse **before consuming inputs**. This is not defensive scripting — it is custody: a run
+that begins without standing over its resource budget produces misleading partial evidence, and
+partial evidence is worse than none because it looks like evidence.
+
+**Fresh-run isolation.** Unique run identity; fresh output directory; previous runs immutable;
+no writing a result into an existing path; no manual mutation of a qualifying run; no
+resume-until-green. A qualification run is a *single* clean execution from declared inputs, not
+a sequence of interactive nudges until the dashboard turns green.
+
+**Refusal as a first-class terminal result.** Not an error, not an absence. A refusal record
+should carry: the first authoritative failed gate; gates passed before it; gates never reached;
+whether artifacts were preserved; and an explicit statement that **no promotion receipt was
+minted.** "Gates not reached" matters — a campaign that stops at gate 6 has said nothing at all
+about gates 7-12, and silence there must not read as pass.
+
+**Unsealed diagnostic custody.** Logs, consoles, disk images, and metadata from a refused run
+are worth preserving and must be marked **diagnostic, not qualifying** — preserved evidence is
+not admitted evidence. The record should also note whether later inspection needs privileged or
+potentially mutating operations, because that is a property of the evidence, discovered now and
+expensive to rediscover later.
+
+**Read-only postmortem protocol.** Operate on a copy; never mount read-write; suppress
+filesystem recovery writes (a plain mount of a dirty filesystem *writes* recovery into the
+artifact you are trying to preserve); record each extraction step; keep diagnosis outside the
+original artifact. Fingerprint the artifact before and after to prove the postmortem did not
+disturb it.
+
+**Diagnostic runs versus qualification runs.** Instrumented, interactive, or partial runs are
+legitimate and useful — they reduce unknowns. They **cannot qualify.** After a correction,
+qualification requires a clean run from exact declared inputs. Two different objects; one
+schema field.
+
+**Correction lineage.** `refused run → diagnosis → corrective change → regression → clean run`.
+Preserve **both** histories. A successful run that erases the refusal that forced it has
+deleted the only evidence that the guarantee was ever tested. The refused run is not
+preliminary noise; it is the hostile evidence.
+
+### 11.3 What profiles own, not Porter
+
+Porter supplies custody, ordering, refusal shape, sealing, and lineage. The **profile** declares
+the gates and what passing means. A monitoring product's profile might assert "package hooks
+start nothing," "the daemon produces an admitted report," "cross-UID boundary holds"; a
+different product's gates would be entirely different — and would reuse every mechanism above
+unchanged. If Porter ever grows an opinion about what a gate *means*, it has crossed §10.1.
+
+Sketch of the envelope this implies (shape only, **not** a ratified schema; any of it landing
+is additive to `porter.record.v0` and needs deliberate ratification):
+
+```
+QualificationRun
+├── exact inputs           (revision, digests, harness identity)
+├── execution environment  (host, accelerator, declared capabilities)
+├── ordered gates          (declared, reached, passed, not-reached)
+├── transport outcome      ─┐
+├── harness verdict         ├── distinct, never collapsed  (§11.1)
+├── qualification verdict  ─┘
+├── first refusal          (authoritative failed gate)
+├── preserved artifacts    (marked diagnostic vs qualifying)
+├── sealing status
+└── promotion eligibility  (profile-defined; Porter enforces only the negative)
+```
+
+### 11.4 Provenance and firing cases
+
+Recorded from an external VM qualification campaign, 2026-07-19. Not imported doctrine — the
+mechanics were rediscovered independently in a hand-rolled harness, which is exactly the signal
+that they belong in a courier rather than in each campaign.
+
+Firing cases, all from one run:
+
+- **Verdict layering.** A background wrapper returned `0`; the harness inside returned `1`. The
+  artifacts, not the notification, held the verdict.
+- **Mutable upstream digest.** The campaign's previously-recorded base-image digest no longer
+  matched upstream `current`; declaring the historical digest would have named bytes that never
+  ran.
+- **Resource-envelope preflight.** The harness demanded 12 GiB free with an 8 GiB scratch cap
+  against 14.8 GiB available, and stopped before consuming inputs rather than producing a
+  half-run.
+- **Preserved-but-unsealed.** The refused run kept its disk image and console logs while
+  emitting no result file, no sealed manifest, and no receipt. The obstruction was diagnosable
+  later precisely because it was preserved without being credited.
+- **Read-only postmortem.** Diagnosis required reading a filesystem left dirty by a killed VM;
+  the honest path was a converted copy read without mounting, leaving the original artifact
+  byte-identical.
+
+Scope-control anchor, recorded verbatim: *exact inputs, bounded execution, authoritative gates,
+honest refusal, preserved obstruction, clean rerun, separately minted promotion.* The product
+tells Porter what testimony it needs; Porter makes sure nobody invents the testimony afterward.
