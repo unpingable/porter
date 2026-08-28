@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_p = sub.add_parser("run", help="up, optional push, exec, optional pull, seal")
     add_runs_dir(run_p)
-    run_p.add_argument("--target", required=True, help="target substrate: ssh:<host>, serial:<unix-socket-path>, or recipe:<script-path>")
+    run_p.add_argument("--target", required=True, help="target substrate: ssh:<host>, ssh-exact:<profile-path>, serial:<unix-socket-path>, or recipe:<script-path>")
     run_p.add_argument("--remote-root", help="remote custody root; defaults to /tmp/porter-<run_id>")
     run_p.add_argument("--push", action="append", default=[], help="local file/tree to push")
     run_p.add_argument("--pull", action="append", default=[], help="remote path/glob to pull from workdir")
@@ -73,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     up_p = sub.add_parser("up", help="create/connect substrate and write record stub")
     add_runs_dir(up_p)
-    up_p.add_argument("target", help="target substrate: ssh:<host>, serial:<unix-socket-path>, or recipe:<script-path>")
+    up_p.add_argument("target", help="target substrate: ssh:<host>, ssh-exact:<profile-path>, serial:<unix-socket-path>, or recipe:<script-path>")
     up_p.add_argument("--remote-root", help="remote custody root; defaults to /tmp/porter-<run_id>")
     up_p.add_argument("--expect", action="append", default=[], metavar="KEY=VAL", help="declare an expected host fact, e.g. os=darwin (repeatable); Porter computes fact_mismatches vs observed")
 

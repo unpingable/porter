@@ -52,6 +52,7 @@ courier machinery itself ran cleanly.
 
 ```bash
 ./porter run --target ssh:<host> [--push <src>] [--pull <glob>] -- <cmd...>
+./porter run --target ssh-exact:/absolute/profile.json [--push <src>] [--pull <glob>] -- <cmd...>
 ./porter run --target serial:/path/to/console.sock -- <cmd...>
 ./porter run --target recipe:./target.sh [--preserve] -- <cmd...>
 ./porter down [--preserve] <run_id>

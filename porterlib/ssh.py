@@ -24,9 +24,12 @@ class SSHTransport:
     def __init__(self, host: str) -> None:
         self.host = host
 
+    def argv_for(self, remote_argv: list[str]) -> list[str]:
+        return ["ssh", self.host, *remote_argv]
+
     def run_script(self, script: str) -> CommandResult:
         proc = subprocess.run(
-            ["ssh", self.host, "sh", "-s"],
+            self.argv_for(["sh", "-s"]),
             input=script.encode("utf-8"),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -35,7 +38,7 @@ class SSHTransport:
 
     def run_script_combined(self, script: str) -> CommandResult:
         proc = subprocess.run(
-            ["ssh", self.host, "sh", "-s"],
+            self.argv_for(["sh", "-s"]),
             input=script.encode("utf-8"),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -43,26 +46,40 @@ class SSHTransport:
         return CommandResult(proc.returncode, proc.stdout, b"")
 
     def push_tar_stream(self, dst: str, tar_bytes: bytes) -> CommandResult:
-        remote = f"mkdir -p {shlex.quote(dst)} && tar -x -C {shlex.quote(dst)}"
+        remote = self.push_remote_command(dst)
         proc = subprocess.run(
-            ["ssh", self.host, remote],
+            self.argv_for([remote]),
             input=tar_bytes,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
         return CommandResult(proc.returncode, proc.stdout, proc.stderr)
 
+    def push_remote_command(self, dst: str) -> str:
+        return f"mkdir -p {shlex.quote(dst)} && tar -x -C {shlex.quote(dst)}"
+
     def pull_tar_stream(self, workdir: str, remote_glob: str) -> CommandResult:
         if not SAFE_REMOTE_GLOB.match(remote_glob) or ".." in Path(remote_glob).parts:
             return CommandResult(2, b"", f"unsafe remote glob: {remote_glob}\n".encode())
-        remote = f"cd {shlex.quote(workdir)} && tar -cf - -- {remote_glob}"
+        remote = self.pull_remote_command(workdir, remote_glob)
         proc = subprocess.run(
-            ["ssh", self.host, remote],
+            self.argv_for([remote]),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
         return CommandResult(proc.returncode, proc.stdout, proc.stderr)
 
+
+    def pull_remote_command(self, workdir: str, remote_glob: str) -> str:
+        return f"cd {shlex.quote(workdir)} && tar -cf - -- {remote_glob}"
+
+    def run_remote_argv(self, remote_argv: list[str]) -> CommandResult:
+        proc = subprocess.run(
+            self.argv_for(remote_argv),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        return CommandResult(proc.returncode, proc.stdout, proc.stderr)
 
 def parse_target(target: str) -> str:
     if not target.startswith("ssh:"):

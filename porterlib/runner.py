@@ -7,10 +7,12 @@ from typing import Any, Callable
 
 from . import record as records
 from .adapters import (
+    ExactSSHAdapter,
     adapter_for_record,
     parse_observed,
     record_transport,
 )
+from .exact_ssh import load_profile
 from .recipe import (
     copy_recipe,
     normalize_recipe_substrate,
@@ -71,6 +73,8 @@ def up(
     remote_root: str | None = None,
     declared_facts: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
+    if target.startswith("ssh-exact:"):
+        return up_exact_ssh(target, runs_dir, remote_root, declared_facts)
     if target.startswith("ssh:"):
         return up_ssh(target, runs_dir, remote_root, declared_facts)
     if target.startswith("serial:"):
@@ -78,7 +82,7 @@ def up(
     if target.startswith("recipe:"):
         return up_recipe(target, runs_dir, declared_facts)
     raise ValueError(
-        f"unsupported target {target!r}; expected ssh:<host>, serial:<unix-socket-path>, or recipe:<script-path>"
+        f"unsupported target {target!r}; expected ssh:<host>, ssh-exact:<profile-path>, serial:<unix-socket-path>, or recipe:<script-path>"
     )
 
 
@@ -117,6 +121,54 @@ printf 'arch=%s\n' "$(uname -m 2>/dev/null || true)"
         record["substrate"]["observed"] = parse_observed(result.stdout)
         records.refresh_fact_mismatches(record["substrate"])
     records.save_record(base, record)
+    return run_id, record
+
+
+def up_exact_ssh(
+    target: str,
+    runs_dir: Path,
+    remote_root: str | None = None,
+    declared_facts: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Connect one pinned endpoint; VM lifecycle remains caller-owned."""
+    profile = load_profile(target)
+    if remote_root is not None and remote_root != profile.remote_root:
+        raise ValueError("--remote-root conflicts with exact SSH profile")
+    run_id = records.new_run_id()
+    base = records.run_dir(runs_dir, run_id)
+    records.ensure_layout(base)
+    profile_snapshot = base / "exact-endpoint-profile.json"
+    profile_snapshot.write_bytes(profile.source.read_bytes())
+    profile_snapshot.chmod(0o600)
+
+    record = records.new_record(
+        run_id,
+        target,
+        f"{profile.user}@{profile.host}:{profile.port}",
+        profile.remote_root,
+    )
+    record["substrate"].update(
+        {
+            "kind": "vm",
+            "transport": ExactSSHAdapter.transport,
+            "ephemeral": False,
+            "declared": profile.declared(),
+            "observed": {},
+            "fact_mismatches": [],
+        }
+    )
+    record["transport_profiles"] = [
+        {
+            "class": records.CUSTODY_RECEIPT,
+            "local_path": profile_snapshot.name,
+            "sha256": profile.source_sha256,
+            "size": profile_snapshot.stat().st_size,
+        }
+    ]
+    record["notes"] = "exact SSH endpoint lifecycle is caller-owned"
+    records.set_declared_facts(record["substrate"], declared_facts)
+    records.save_record(base, record)
+    ExactSSHAdapter().observe_and_record(record, base)
     return run_id, record
 
 

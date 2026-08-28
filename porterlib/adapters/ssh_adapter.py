@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import shlex
 from pathlib import Path
 from typing import Any
@@ -77,6 +78,8 @@ printf 'arch=%s\n' "$(uname -m 2>/dev/null || true)"
         observed, rc = parse_exec_result(transcript_bytes, token)
 
         extra: dict[str, Any] = {}
+        extra["transport_argv"] = transport.argv_for(["sh", "-s"])
+        extra["payload_argv"] = list(command)
         if env:
             extra["env_keys"] = sorted(env.keys())
         records.add_step(
@@ -116,6 +119,16 @@ printf 'arch=%s\n' "$(uname -m 2>/dev/null || true)"
                 tar_bytes, method = git_archive_or_tar(src)
                 if method.startswith("git archive"):
                     dirty_worktree = is_dirty_worktree(src)
+            input_artifact: dict[str, Any] = {
+                "local_path": str(src.resolve()),
+                "archive_sha256": hashlib.sha256(tar_bytes).hexdigest(),
+                "archive_size": len(tar_bytes),
+            }
+            if src.is_file():
+                input_artifact.update(
+                    sha256=records.sha256_file(src),
+                    size=records.file_size(src),
+                )
             result = transport.push_tar_stream(remote_dst, tar_bytes)
         except Exception as exc:  # noqa: BLE001 - record courier failure instead of hiding it.
             ended = records.utc_now()
@@ -138,7 +151,13 @@ printf 'arch=%s\n' "$(uname -m 2>/dev/null || true)"
         ended = records.utc_now()
         transcript_bytes = result.stdout + result.stderr
         (base / transcript).write_bytes(transcript_bytes)
-        push_extra: dict[str, Any] = {"remote_dst": remote_dst}
+        push_extra: dict[str, Any] = {
+            "remote_dst": remote_dst,
+            "input_artifacts": [input_artifact],
+            "transport_argv": transport.argv_for(
+                [transport.push_remote_command(remote_dst)]
+            ),
+        }
         if dirty_worktree is True:
             push_extra["dirty_worktree"] = True
         records.add_step(
@@ -183,7 +202,12 @@ printf 'arch=%s\n' "$(uname -m 2>/dev/null || true)"
             transcript=transcript,
             exit_code_observed=True,
             exit_code=result.returncode,
-            extra={"remote_glob": remote_glob},
+            extra={
+                "remote_glob": remote_glob,
+                "transport_argv": transport.argv_for(
+                    [transport.pull_remote_command(remote_workdir(record), remote_glob)]
+                ),
+            },
         )
         if result.returncode != 0:
             records.mark_refused(record, f"requested artifact was not available: {remote_glob}")

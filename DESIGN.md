@@ -92,6 +92,9 @@ porter show   <run>                    # print record.json
 
 Current v0 target shapes:
 - `ssh:<host>` — already-reachable SSH host; supports push/exec/pull.
+- `ssh-exact:<absolute-profile-path>` — already-reachable SSH endpoint with
+  pinned local transport files and a mechanically matched remote identity;
+  supports push/exec/pull and never owns endpoint lifecycle.
 - `serial:<unix-socket-path>` — already-booted VM serial console over a Unix socket; exec only.
 - `recipe:<script-path>` — caller-provided lifecycle hook; `up` returns an `ssh` or
   `serial-socket` substrate, `down` tears it down unless `--preserve` is set.
