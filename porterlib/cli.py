@@ -66,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--pull", action="append", default=[], help="remote path/glob to pull from workdir")
     run_p.add_argument("--env", action="append", default=[], metavar="KEY=VAL", help="set env var before command (repeatable); keys recorded, values never stored")
     run_p.add_argument("--expect", action="append", default=[], metavar="KEY=VAL", help="declare an expected host fact, e.g. os=darwin (repeatable); Porter computes fact_mismatches vs observed")
+    run_p.add_argument("--reservation", help="record one caller-declared external evidence reservation (sha256:...)")
     run_p.add_argument("--worktree", action="store_true", help="push the dirty working tree instead of git archive HEAD")
     run_p.add_argument("--propagate-exit", action="store_true", help="return payload exit for run_failed")
     run_p.add_argument("--preserve", action="store_true", help="preserve recipe-created substrate instead of invoking teardown")
@@ -76,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     up_p.add_argument("target", help="target substrate: ssh:<host>, ssh-exact:<profile-path>, serial:<unix-socket-path>, or recipe:<script-path>")
     up_p.add_argument("--remote-root", help="remote custody root; defaults to /tmp/porter-<run_id>")
     up_p.add_argument("--expect", action="append", default=[], metavar="KEY=VAL", help="declare an expected host fact, e.g. os=darwin (repeatable); Porter computes fact_mismatches vs observed")
+    up_p.add_argument("--reservation", help="record one caller-declared external evidence reservation (sha256:...)")
 
     push_p = sub.add_parser("push", help="push a local file/tree to the substrate")
     add_runs_dir(push_p)
@@ -129,6 +131,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         preserve=args.preserve,
         env=parse_env(args.env) or None,
         expect=parse_expect(args.expect) or None,
+        evidence_reservation=args.reservation,
         worktree=args.worktree,
     )
     print(record["run_id"])
@@ -137,7 +140,11 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_up(args: argparse.Namespace) -> int:
     run_id, record = runner.up(
-        args.target, Path(args.runs_dir), args.remote_root, parse_expect(args.expect) or None
+        args.target,
+        Path(args.runs_dir),
+        args.remote_root,
+        parse_expect(args.expect) or None,
+        args.reservation,
     )
     print(run_id)
     return 0 if record.get("outcome") not in {records.OUTCOME_REFUSED, records.OUTCOME_PORTER_FAILED} else 1

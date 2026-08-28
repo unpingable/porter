@@ -72,15 +72,16 @@ def up(
     runs_dir: Path,
     remote_root: str | None = None,
     declared_facts: dict[str, Any] | None = None,
+    evidence_reservation: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     if target.startswith("ssh-exact:"):
-        return up_exact_ssh(target, runs_dir, remote_root, declared_facts)
+        return up_exact_ssh(target, runs_dir, remote_root, declared_facts, evidence_reservation)
     if target.startswith("ssh:"):
-        return up_ssh(target, runs_dir, remote_root, declared_facts)
+        return up_ssh(target, runs_dir, remote_root, declared_facts, evidence_reservation)
     if target.startswith("serial:"):
-        return up_serial(target, runs_dir, declared_facts)
+        return up_serial(target, runs_dir, declared_facts, evidence_reservation)
     if target.startswith("recipe:"):
-        return up_recipe(target, runs_dir, declared_facts)
+        return up_recipe(target, runs_dir, declared_facts, evidence_reservation)
     raise ValueError(
         f"unsupported target {target!r}; expected ssh:<host>, ssh-exact:<profile-path>, serial:<unix-socket-path>, or recipe:<script-path>"
     )
@@ -91,6 +92,7 @@ def up_ssh(
     runs_dir: Path,
     remote_root: str | None = None,
     declared_facts: dict[str, Any] | None = None,
+    evidence_reservation: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     host = parse_ssh_target(target)
     run_id = records.new_run_id()
@@ -98,6 +100,8 @@ def up_ssh(
     base = records.run_dir(runs_dir, run_id)
     records.ensure_layout(base)
     record = records.new_record(run_id, target, host, remote_root)
+    if evidence_reservation is not None:
+        records.bind_reservation(record, evidence_reservation)
     records.set_declared_facts(record["substrate"], declared_facts)
     records.save_record(base, record)
 
@@ -129,6 +133,7 @@ def up_exact_ssh(
     runs_dir: Path,
     remote_root: str | None = None,
     declared_facts: dict[str, Any] | None = None,
+    evidence_reservation: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Connect one pinned endpoint; VM lifecycle remains caller-owned."""
     profile = load_profile(target)
@@ -147,6 +152,8 @@ def up_exact_ssh(
         f"{profile.user}@{profile.host}:{profile.port}",
         profile.remote_root,
     )
+    if evidence_reservation is not None:
+        records.bind_reservation(record, evidence_reservation)
     record["substrate"].update(
         {
             "kind": "vm",
@@ -176,12 +183,15 @@ def up_serial(
     target: str,
     runs_dir: Path,
     declared_facts: dict[str, Any] | None = None,
+    evidence_reservation: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     socket_path = parse_serial_target(target)
     run_id = records.new_run_id()
     base = records.run_dir(runs_dir, run_id)
     records.ensure_layout(base)
     record = records.new_serial_record(run_id, target, socket_path)
+    if evidence_reservation is not None:
+        records.bind_reservation(record, evidence_reservation)
     records.set_declared_facts(record["substrate"], declared_facts)
     records.save_record(base, record)
 
@@ -213,12 +223,15 @@ def up_recipe(
     target: str,
     runs_dir: Path,
     declared_facts: dict[str, Any] | None = None,
+    evidence_reservation: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     source = parse_recipe_target(target)
     run_id = records.new_run_id()
     base = records.run_dir(runs_dir, run_id)
     records.ensure_layout(base)
     record = records.new_recipe_record(run_id, target, str(source))
+    if evidence_reservation is not None:
+        records.bind_reservation(record, evidence_reservation)
     records.save_record(base, record)
 
     try:

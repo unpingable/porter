@@ -20,7 +20,9 @@ OUTCOME_RUN_FAILED = "run_failed"
 OUTCOME_PORTER_FAILED = "porter_failed"
 OUTCOME_REFUSED = "refused"
 
-RECORD_SCHEMA = "porter.record.v0"
+RECORD_SCHEMA_V0 = "porter.record.v0"
+RECORD_SCHEMA_V1 = "porter.record.v1"
+RECORD_SCHEMA = RECORD_SCHEMA_V0
 
 TERMINAL_OUTCOMES = {
     OUTCOME_COMPLETED,
@@ -45,6 +47,7 @@ REQUIRED_RECORD_V0_FIELDS = frozenset(
         "notes",
     }
 )
+REQUIRED_RECORD_V1_FIELDS = REQUIRED_RECORD_V0_FIELDS | {"evidence_reservation"}
 
 DOMAIN_VERDICT_FIELDS = frozenset({"success", "passed", "supported", "admissible"})
 
@@ -192,6 +195,38 @@ def new_recipe_record(run_id: str, target: str, recipe_source: str) -> dict[str,
     }
 
 
+def _is_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 71
+        and value.startswith("sha256:")
+        and all(character in "0123456789abcdef" for character in value[7:])
+    )
+
+
+def bind_reservation(record: dict[str, Any], evidence_reservation: str) -> None:
+    """Bind one caller-declared factual coordinate to a run record.
+
+    Porter validates only the coordinate shape and exact replay. It does not
+    allocate the reservation or interpret its campaign meaning.
+    """
+    if not _is_sha256(evidence_reservation):
+        raise RecordContractError(
+            "evidence reservation must be a lowercase sha256 digest"
+        )
+    existing = record.get("evidence_reservation")
+    if existing is not None and existing != evidence_reservation:
+        raise RecordContractError(
+            "Porter run is already bound to another evidence reservation"
+        )
+    if existing == evidence_reservation:
+        return
+    if record.get("schema") not in (None, RECORD_SCHEMA_V0, RECORD_SCHEMA_V1):
+        raise RecordContractError("unsupported record schema for reservation binding")
+    record["schema"] = RECORD_SCHEMA_V1
+    record["evidence_reservation"] = evidence_reservation
+
+
 # ── Declared-vs-observed host facts (F1) ────────────────────────────────────
 # A caller may DECLARE expected host facts (substrate.declared_facts) but never
 # dictate the result. Porter computes substrate.fact_mismatches itself, comparing
@@ -251,7 +286,7 @@ def ensure_record_schema(record: dict[str, Any]) -> None:
     if schema is None:
         record["schema"] = RECORD_SCHEMA
         return
-    if schema != RECORD_SCHEMA:
+    if schema not in {RECORD_SCHEMA_V0, RECORD_SCHEMA_V1}:
         raise RecordContractError(f"unsupported record schema: {schema!r}")
 
 
@@ -283,9 +318,15 @@ def validate_record_contract(record: dict[str, Any]) -> None:
     ensure_record_schema(record)
     assert_no_domain_fields(record)
 
-    missing = sorted(REQUIRED_RECORD_V0_FIELDS - set(record))
+    schema = record["schema"]
+    required = REQUIRED_RECORD_V1_FIELDS if schema == RECORD_SCHEMA_V1 else REQUIRED_RECORD_V0_FIELDS
+    missing = sorted(required - set(record))
     if missing:
-        raise RecordContractError(f"record is missing required v0 field(s): {', '.join(missing)}")
+        raise RecordContractError(f"record is missing required field(s): {', '.join(missing)}")
+    if schema == RECORD_SCHEMA_V0 and "evidence_reservation" in record:
+        raise RecordContractError("v0 record cannot carry an evidence reservation")
+    if schema == RECORD_SCHEMA_V1 and not _is_sha256(record.get("evidence_reservation")):
+        raise RecordContractError("v1 record has malformed evidence reservation")
 
     outcome = record.get("outcome")
     if outcome is not None and outcome not in TERMINAL_OUTCOMES:
@@ -635,6 +676,8 @@ def aggregate(record: dict[str, Any]) -> dict[str, Any]:
     }
     if "recipes" in record:
         payload["recipes"] = [_scrub_recipe(recipe) for recipe in record.get("recipes", [])]
+    if record.get("schema") == RECORD_SCHEMA_V1:
+        payload["evidence_reservation"] = record["evidence_reservation"]
     if "lifecycle" in record:
         payload["lifecycle"] = _lifecycle_receipt(record.get("lifecycle", {}))
     return payload
