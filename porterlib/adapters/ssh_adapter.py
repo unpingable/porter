@@ -141,6 +141,8 @@ printf 'arch=%s\n' "$(uname -m 2>/dev/null || true)"
             admission = {
                 "schema": TRANSFER_ADMISSION_SCHEMA,
                 "status": "pending",
+                "verified": False,
+                "destination_root": remote_dst,
                 "archive_sha256": hashlib.sha256(tar_bytes).hexdigest(),
                 "archive_size": len(tar_bytes),
                 "archive_member_count": len(archive_members),
@@ -177,6 +179,7 @@ printf 'arch=%s\n' "$(uname -m 2>/dev/null || true)"
             if remote_members != archive_members:
                 raise ValueError("destination reread manifest mismatch")
             admission["status"] = "verified"
+            admission["verified"] = True
             admission["remote_member_count"] = verified_count
             admission["remote_manifest_sha256"] = transfer_manifest_sha256(remote_members)
             result = transport_result

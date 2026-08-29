@@ -1039,6 +1039,9 @@ class PorterCliTests(unittest.TestCase):
         push_step = next(step for step in record["steps"] if step["kind"] == "push")
         admission = push_step["transfer_admission"]
         self.assertEqual(admission["status"], "verified")
+        self.assertTrue(admission["verified"])
+        self.assertEqual(admission["destination_root"], str(remote_root / "work"))
+        self.assertEqual(admission["source_member_count"], 3)
         self.assertEqual(admission["archive_member_count"], 3)
         self.assertEqual(admission["remote_member_count"], 3)
         artifact = next(item for item in record["artifacts"] if item["remote_path"] == "inbox/attempt-a/request.json")
@@ -1063,6 +1066,8 @@ class PorterCliTests(unittest.TestCase):
         self.assertEqual(push_step["transport_exit_code"], 0)
         self.assertEqual(push_step["verification_exit_code"], 97)
         self.assertEqual(push_step["transfer_admission"]["status"], "pending")
+        self.assertFalse(push_step["transfer_admission"]["verified"])
+        self.assertEqual(push_step["transfer_admission"]["destination_root"], str(remote_root / "work"))
 
     def test_interrupted_push_transfer_is_fail_closed(self) -> None:
         src = self.tmp_path / "interrupted-src"
