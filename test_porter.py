@@ -12,12 +12,14 @@ import tempfile
 import textwrap
 import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 from typing import Any
 
 import porter
 from porterlib import record as records
 from porterlib import runner
+from porterlib import ssh as sshlib
 
 
 ROOT = Path(__file__).resolve().parent
@@ -987,6 +989,119 @@ class PorterCliTests(unittest.TestCase):
             push_step.get("dirty_worktree"),
             f"expected no dirty_worktree annotation on clean push; got: {push_step}",
         )
+
+    def test_nested_untracked_directory_raw_git_archive_fixture_is_zero_member(self) -> None:
+        repo = self.tmp_path / "nested-raw-repo"
+        self._init_git_repo(repo, "tracked.txt", "committed\n")
+        nested = repo / "nested" / "porter-input" / "inbox" / "attempt-a"
+        nested.mkdir(parents=True)
+        (nested / "request.json").write_text('{"attempt":"a"}\n', encoding="utf-8")
+        proc = subprocess.run(
+            ["git", "-C", str(nested), "archive", "HEAD"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode("utf-8", errors="replace"))
+        self.assertEqual(len(proc.stdout), 10240)
+        listing = subprocess.run(["tar", "-tf", "-"], input=proc.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        self.assertEqual(listing.returncode, 0, listing.stderr.decode("utf-8", errors="replace"))
+        self.assertEqual(listing.stdout, b"")
+
+    def test_nested_untracked_directory_push_uses_exact_tar_and_verifies_request(self) -> None:
+        repo = self.tmp_path / "nested-repo"
+        self._init_git_repo(repo, "tracked.txt", "committed\n")
+        package = repo / "nested" / "porter-input"
+        inbox = package / "inbox" / "attempt-a"
+        inbox.mkdir(parents=True)
+        (inbox / "predecessor.bundle").write_bytes(b"bundle-bytes\n")
+        (inbox / "prompt.txt").write_text("prompt\n", encoding="utf-8")
+        request_bytes = b'{"attempt":"a"}\n'
+        (inbox / "request.json").write_bytes(request_bytes)
+
+        runs_dir = self.tmp_path / "nested-runs"
+        remote_root = self.tmp_path / "nested-remote"
+        result = self.run_porter(
+            "run",
+            "--runs-dir", str(runs_dir),
+            "--target", "ssh:fake",
+            "--remote-root", str(remote_root),
+            "--push", str(package),
+            "--pull", "inbox/attempt-a/request.json",
+            "--",
+            "sh", "-c", "test -f inbox/attempt-a/request.json && echo ok",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run_id = result.stdout.strip()
+        run_base = runs_dir / run_id
+        record = self.load_record(runs_dir, run_id)
+        push_step = next(step for step in record["steps"] if step["kind"] == "push")
+        admission = push_step["transfer_admission"]
+        self.assertEqual(admission["status"], "verified")
+        self.assertEqual(admission["archive_member_count"], 3)
+        self.assertEqual(admission["remote_member_count"], 3)
+        artifact = next(item for item in record["artifacts"] if item["remote_path"] == "inbox/attempt-a/request.json")
+        self.assertEqual((run_base / artifact["local_path"]).read_bytes(), request_bytes)
+
+    def test_push_remote_reread_failure_refuses_false_exit_zero(self) -> None:
+        src = self.tmp_path / "reread-src"
+        src.mkdir()
+        (src / "hello.txt").write_text("hello\n", encoding="utf-8")
+        runs_dir = self.tmp_path / "reread-runs"
+        remote_root = self.tmp_path / "reread-remote"
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = f"{self.fakebin}{os.pathsep}{old_path}"
+        try:
+            run_id, _ = runner.up("ssh:fake", runs_dir, str(remote_root))
+            with mock.patch.object(sshlib.SSHTransport, "run_script", return_value=sshlib.CommandResult(97, b"MISSING\thello.txt\n", b"")):
+                record = runner.push(run_id, runs_dir, src)
+        finally:
+            os.environ["PATH"] = old_path
+        push_step = next(step for step in record["steps"] if step["kind"] == "push")
+        self.assertEqual(record["outcome"], records.OUTCOME_PORTER_FAILED)
+        self.assertEqual(push_step["transport_exit_code"], 0)
+        self.assertEqual(push_step["verification_exit_code"], 97)
+        self.assertEqual(push_step["transfer_admission"]["status"], "pending")
+
+    def test_interrupted_push_transfer_is_fail_closed(self) -> None:
+        src = self.tmp_path / "interrupted-src"
+        src.mkdir()
+        (src / "hello.txt").write_text("hello\n", encoding="utf-8")
+        runs_dir = self.tmp_path / "interrupted-runs"
+        remote_root = self.tmp_path / "interrupted-remote"
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = f"{self.fakebin}{os.pathsep}{old_path}"
+        try:
+            run_id, _ = runner.up("ssh:fake", runs_dir, str(remote_root))
+            with mock.patch.object(sshlib.SSHTransport, "push_tar_stream", return_value=sshlib.CommandResult(255, b"", b"interrupted\n")):
+                record = runner.push(run_id, runs_dir, src)
+        finally:
+            os.environ["PATH"] = old_path
+        push_step = next(step for step in record["steps"] if step["kind"] == "push")
+        self.assertEqual(record["outcome"], records.OUTCOME_PORTER_FAILED)
+        self.assertEqual(push_step["transport_exit_code"], 255)
+        self.assertIsNone(push_step["verification_exit_code"])
+
+    def test_duplicate_identical_push_is_idempotent(self) -> None:
+        src = self.tmp_path / "repeat-src"
+        src.mkdir()
+        (src / "hello.txt").write_text("hello\n", encoding="utf-8")
+        runs_dir = self.tmp_path / "repeat-runs"
+        remote_root = self.tmp_path / "repeat-remote"
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = f"{self.fakebin}{os.pathsep}{old_path}"
+        try:
+            run_id, _ = runner.up("ssh:fake", runs_dir, str(remote_root))
+            first = runner.push(run_id, runs_dir, src)
+            second = runner.push(run_id, runs_dir, src)
+        finally:
+            os.environ["PATH"] = old_path
+        self.assertEqual(first["run_id"], second["run_id"])
+        push_steps = [step for step in second["steps"] if step["kind"] == "push"]
+        self.assertEqual(len(push_steps), 2)
+        self.assertTrue(all(step["transfer_admission"]["status"] == "verified" for step in push_steps))
+        self.assertEqual((remote_root / "work" / "hello.txt").read_text(encoding="utf-8"), "hello\n")
 
     def test_worktree_flag_delivers_dirty_bytes(self) -> None:
         """--worktree pushes the working tree (including uncommitted edits), not git archive HEAD."""
