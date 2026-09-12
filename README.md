@@ -1,8 +1,14 @@
-# porter
+# Porter
 
 A neutral courier for ephemeral substrates: it runs a declared command on a declared
 temporary substrate (VM, container, or reachable host) and brings back honest receipts —
 transcript, true exit code, produced artifacts, and their hashes. A mule with receipts.
+
+**Status:** early, usable implementation. Public `main` includes the SSH,
+serial-console, and caller-recipe transports, stepwise and one-shot CLI paths,
+the `porter.record.v0` contract, custody export, and a thin Python API. The
+live SSH path is qualified by the checked-in specimens linked below. This is
+not a claim that every substrate or downstream composition is supported.
 
 ## 30-second specimen
 
@@ -39,6 +45,9 @@ courier machinery itself ran cleanly.
   satisfy any caller's contract.
 - Not a provisioning framework — provisioning stays per-substrate; Porter abstracts what
   happens *after* you have a shell.
+- Not a scheduler, authority office, attempt custodian, settlement service, or
+  reconciliation engine. Selecting a command and having access to a transport
+  do not admit or authorize that command.
 
 ## Invariants
 
@@ -91,6 +100,41 @@ record = porter.run(
 
 The API returns the final `porter.record.v0` dict. It does not return a boolean or decide
 whether the receipts satisfy a caller's domain.
+
+## Entry points and dependencies
+
+- Installed CLI: `porter` (`porterlib.cli:main`); source-tree CLI: `./porter`.
+- Library: `porter.run(...)`, returning the final `porter.record.v0` mapping.
+- Runtime: Python 3.10 or newer and the Python standard library. The selected
+  transport also requires its ordinary local tools or endpoint: `ssh`/`scp`, a
+  Unix serial socket, or a caller-owned recipe script.
+- Tests: `python3 -m pytest`; pytest is a development dependency, not a runtime
+  service dependency.
+
+Porter does not run a daemon, expose an MCP server, provision an endpoint, or
+discover work. Callers supply the target, command, transfers, and any lifecycle
+recipe explicitly.
+
+## Constellation relationship
+
+Porter is the Constellation family's transport-and-receipt courier. It can run
+a caller-selected read-only inspection just as it can run a build, but its
+record establishes only the command, transcript, observed exit, artifacts,
+and hashes. It does not establish that an inspection result is current,
+adequate, authorized, or accepted.
+
+When composed with Constellation Docket, the boundary remains explicit:
+Docket owns governed attempt custody, settlement, and reconciliation; Porter
+owns factual substrate execution and transport receipts. Porter does not own
+admission, standing, authorization, recurrence, or scheduling. A particular
+Docket adapter or product profile must be documented and qualified separately;
+the generic ability to courier a command is not evidence that such a connection
+is available in this public revision.
+
+The canonical product identity is the existing `Porter` project in this
+repository. Repository renaming or relocation, if ever desired, follows the
+family's normal naming and publication process; this document does not propose
+or perform either.
 
 ## Design
 

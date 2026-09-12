@@ -1,8 +1,11 @@
-# Porter — skeleton design (v0)
+# Porter — v0 design and implementation history
 
-Companion to `CANDIDATE.md`. This is the smallest repo/CLI skeleton, not an implementation.
-Porter is self-contained: it imports no AG or NQ doctrine and defines its terms in courier
-language only.
+Companion to `CANDIDATE.md`. This document began as the smallest repo/CLI
+skeleton and retains the implementation sequence and review findings as
+history. The current public implementation and entry points are summarized in
+`README.md`; source and tests establish what is present. Porter is
+self-contained: it imports no AG or NQ doctrine and defines its terms in
+courier language only.
 
 ## 1. Charter
 
@@ -47,12 +50,13 @@ Porter serves two related uses, and we are **not** choosing between them:
 
 1. **Build-time courier** — humans or agents drive Porter while developing constellation
    tools. This is the only use exercised to date (NQ ×2, AG ×1) and all of v0 serves it.
-2. **Runtime-callable courier** — built tools may *eventually* call Porter to obtain substrate
-   receipts without learning substrate mechanics.
+2. **Runtime-callable courier** — built tools may call Porter's thin Python API
+   to obtain substrate receipts without learning substrate mechanics.
 
-The v0 implementation is **CLI-first**, because that is the narrowest useful surface. We do
-**not** build the runtime API yet — no daemon, no server, no plugin architecture. The single
-forward-looking commitment is smaller and cheaper:
+The v0 implementation was **CLI-first**, because that was the narrowest useful
+surface. It now also has a thin in-process Python API over the same core. It
+still has no daemon, server, or plugin architecture. The original
+forward-looking commitment remains the compatibility boundary:
 
 > **`record.json` is a durable contract, not incidental CLI output.** Version it as
 > `porter.record.v0` from day one.

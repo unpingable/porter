@@ -27,7 +27,7 @@ Always run tests before proposing commits. Never claim tests pass without runnin
 
 ### Do not do these without explicit user confirmation
 - Push to remote, create/close PRs or issues
-- Delete or rewrite git history (repo is not yet under git; the author will init it)
+- Delete or rewrite git history
 - Change the `porter.record.v0` schema in a non-additive way (removing/repurposing a field)
 - Add a domain verdict field, or make Porter own substrate provisioning
 
@@ -41,9 +41,9 @@ Always run tests before proposing commits. Never claim tests pass without runnin
 
 ```
 porter            # CLI entrypoint → porterlib.cli:main
-porterlib/        # core: cli.py, record.py, runner.py, ssh.py
+porterlib/        # core, SSH/serial/recipe transports, and thin Python API
 runs/<run_id>/    # per-run local custody (gitignored)
-outputs/          # checked-in evidence specimens
+docs/specimens/   # checked-in qualification specimens
 test_porter.py    # tests
 DESIGN.md         # authoritative v0 design (roadmap in §8)
 CANDIDATE.md      # historical design input
@@ -77,9 +77,11 @@ CANDIDATE.md      # historical design input
 
 ## Roadmap
 
-The committed order lives in `DESIGN.md` §8. Slice 1 (SSH courier) is implemented. Next is
-Slice 1.5 (contract hardening / CLI-core split) before Slice 2 (serial-console transport). Do
-not jump ahead of the order without a stated reason.
+The historical implementation order lives in `DESIGN.md` §8. Public `main`
+already contains the SSH, serial-console, caller-recipe, custody-export, and
+thin Python API slices. Treat remaining roadmap items as historical design
+context or future proposals, not as a statement that these implemented
+surfaces are absent.
 
 ---
 
